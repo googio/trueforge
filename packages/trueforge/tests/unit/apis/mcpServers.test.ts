@@ -237,6 +237,14 @@ describe('mcp-servers routers', () => {
     });
   });
 
+  it('PUT and POST reject reserved first-party names', async () => {
+    for (const name of ['trueforge', 'truefoundry']) {
+      const reserved = { type: 'remote' as const, name, url: 'https://mcp.example.com/x', description: 'x.' };
+      expect((await settingsRouter.request('/', putInit(wrapManifest(reserved)))).status).toBe(400);
+      expect((await settingsRouter.request('/', postInit(wrapManifest(reserved)))).status).toBe(400);
+    }
+  });
+
   it('PUT and POST reject private outbound URLs', async () => {
     const blocked = {
       type: 'remote' as const,

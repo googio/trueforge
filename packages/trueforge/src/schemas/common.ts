@@ -25,6 +25,17 @@ export const NameSchema = z
 
 export type ResourceName = z.infer<typeof NameSchema>;
 
+/**
+ * First-party brand namespaces reserved across all user-named resources (agents, MCP servers,
+ * sandbox environments); a user-supplied name may not claim them.
+ */
+export const RESERVED_RESOURCE_NAMES = new Set(['tfg', 'trueforge', 'truefoundry']);
+
+/** True when `name` collides with a reserved first-party brand namespace. */
+export function isReservedResourceName(name: string): boolean {
+  return RESERVED_RESOURCE_NAMES.has(name);
+}
+
 export const PAGE_LIMIT = 25;
 /** Session/turn event list page size (default = max). */
 export const EVENTS_PAGE_LIMIT = 100;
