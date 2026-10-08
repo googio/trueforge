@@ -6,11 +6,16 @@
  * `TRUEFORGE_API_KEY` is intentionally never used here.
  */
 import { TrueForge } from '@truefoundry/trueforge-sdk';
+import configuration from '../../../config';
+import { createTlsFetch, normalizeTlsUrl } from '../../../http/tls';
 
 export function createTrueForgeClient(input: { baseUrl: string; userCredential: string | null }): TrueForge {
+  const tls = { enabled: configuration.MTLS_ENABLED, dir: configuration.MTLS_CERTS_DIR };
+  const tlsFetch = createTlsFetch(tls);
   return new TrueForge({
-    baseUrl: input.baseUrl,
+    baseUrl: normalizeTlsUrl({ url: input.baseUrl, enabled: tls.enabled }),
     timeoutInSeconds: 60,
     ...(input.userCredential === null ? { auth: false } : { token: input.userCredential }),
+    ...(tlsFetch === undefined ? {} : { fetch: tlsFetch }),
   });
 }

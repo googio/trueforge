@@ -296,14 +296,8 @@ export async function validateAgentSpec({
   const requestedMcpServers = spec.mcp_servers ?? [];
   if (requestedMcpServers.length > 0) {
     const names = requestedMcpServers.map(server => server.name);
-    const configuredNames = new Set(
-      (
-        await mcpServerStore.listServers({
-          tenant_id,
-          names,
-        })
-      ).map(record => record.name),
-    );
+    const records = await mcpServerStore.listServers({ tenant_id, names });
+    const configuredNames = new Set(records.map(record => record.name));
     const unknown = requestedMcpServers.find(server => !configuredNames.has(server.name));
     if (unknown !== undefined) {
       throw new HTTPException(422, {

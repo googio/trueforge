@@ -12,11 +12,13 @@
 import {
   configureOutboundFetches,
   configureOutboundUrlGuard,
+  configureTrustedMcpEndpoint,
   extractErrorLogFields,
 } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { createTlsFetch, normalizeTlsUrl } from './http/tls';
 import {
   ensureLocalSandboxRootParent,
   prepareCodeModeSocketParent,
@@ -68,6 +70,10 @@ try {
       idempotent: false,
     },
   });
+  const tls = { enabled: configuration.MTLS_ENABLED, dir: configuration.MTLS_CERTS_DIR };
+  const trustedFetch = createTlsFetch(tls) ?? fetch;
+  const serverUrl = normalizeTlsUrl({ url: configuration.SERVER_URL, enabled: tls.enabled });
+  configureTrustedMcpEndpoint({ url: new URL('/mcp', serverUrl).href, fetch: trustedFetch });
 } catch (error) {
   console.error(
     'Failed to start server: Failed to load configuration:',
