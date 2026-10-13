@@ -67,24 +67,6 @@ export function defaultMcpOutboundFetchOptions(): OutboundFetchOptions {
 let outbound: OutboundFetch = createOutboundFetch(defaultOutboundFetchOptions());
 let modelOutbound: OutboundFetch = createOutboundFetch(defaultModelOutboundFetchOptions());
 let mcpOutbound: OutboundFetch = createOutboundFetch(defaultMcpOutboundFetchOptions());
-let trustedMcpEndpoint:
-  | {
-      url: string;
-      fetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
-    }
-  | undefined;
-
-/** Configure the one server-owned MCP endpoint allowed to bypass the general SSRF guard. */
-export function configureTrustedMcpEndpoint(
-  endpoint:
-    | {
-        url: string;
-        fetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
-      }
-    | undefined,
-): void {
-  trustedMcpEndpoint = endpoint === undefined ? undefined : { url: new URL(endpoint.url).href, fetch: endpoint.fetch };
-}
 
 /** Replace outbound Agents (timeouts/retries). Does not change SSRF allow/block lists. */
 export function configureOutboundFetches(config: {
@@ -115,16 +97,5 @@ export async function modelSsrfFetch(input: string | URL | Request, init?: Reque
 
 /** Drop-in fetch for remote MCP (long bodyTimeout; does not retry headers timeouts). */
 export async function mcpSsrfFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
-  if (trustedMcpEndpoint !== undefined) {
-    let url: string | undefined;
-    try {
-      url = new URL(input instanceof Request ? input.url : input).href;
-    } catch {
-      // The guarded fetch below produces the standard blocked-URL error.
-    }
-    if (url === trustedMcpEndpoint.url) {
-      return trustedMcpEndpoint.fetch(input, { ...init, redirect: 'manual' });
-    }
-  }
   return mcpOutbound.fetch(input, init);
 }

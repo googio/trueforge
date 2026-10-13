@@ -173,7 +173,6 @@ export {
   DEFAULT_OUTBOUND_HTTP_HEADERS_TIMEOUT_MS,
   DEFAULT_OUTBOUND_HTTP_MAX_RETRIES,
   configureOutboundFetches,
-  configureTrustedMcpEndpoint,
   defaultMcpOutboundFetchOptions,
   defaultModelOutboundFetchOptions,
   defaultOutboundFetchOptions,

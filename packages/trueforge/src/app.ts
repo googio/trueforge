@@ -619,9 +619,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     '/mcp',
     createTrueForgeMcpRouter({
       resolveRequestContext,
-      serverUrl: configuration.SERVER_URL,
       version: PACKAGE_VERSION,
-      logger: deps.logger,
     }),
   );
 

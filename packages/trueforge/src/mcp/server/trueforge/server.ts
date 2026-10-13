@@ -1,6 +1,11 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { TrueForge } from '@truefoundry/trueforge-sdk';
-import { registerTrueForgeTools } from './tools';
+import { registerAgentTools } from './tools/agents';
+import { registerMcpServerTools } from './tools/mcpServers';
+import { registerModelTools } from './tools/models';
+import { registerSandboxEnvironmentTools } from './tools/sandboxEnvironments';
+import { registerScheduleTools } from './tools/schedules';
+import { registerSkillTools } from './tools/skills';
 
 /** The active built-in TrueForge connector name. See docs-internal/trueforge-mcp-server.md §3.5/§3.8. */
 export const TRUEFORGE_CONNECTOR_NAME = 'trueforge';
@@ -20,6 +25,11 @@ export function createTrueForgeMcpServer(input: { client: TrueForge; version: st
     { name: TRUEFORGE_CONNECTOR_NAME, title: TRUEFORGE_SERVER_TITLE, version: input.version },
     { instructions: TRUEFORGE_INSTRUCTIONS },
   );
-  registerTrueForgeTools(server, input.client);
+  registerAgentTools(server, input.client);
+  registerScheduleTools(server, input.client);
+  registerSandboxEnvironmentTools(server, input.client);
+  registerModelTools(server, input.client);
+  registerMcpServerTools(server, input.client);
+  registerSkillTools(server, input.client);
   return server;
 }

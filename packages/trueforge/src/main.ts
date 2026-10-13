@@ -12,14 +12,11 @@
 import {
   configureOutboundFetches,
   configureOutboundUrlGuard,
-  configureTrustedMcpEndpoint,
   extractErrorLogFields,
 } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { createTlsFetch, normalizeTlsUrl } from './http/tls';
-import { withTrueForgeMcpHeader } from './mcp/server/trueforge/headers';
 import {
   ensureLocalSandboxRootParent,
   prepareCodeModeSocketParent,
@@ -43,6 +40,7 @@ try {
     getPublicUiBasePath,
     TrueForgeAuthMode,
   } = await import('./config'));
+  const { trueForgeMcpTrustedEndpoint } = await import('./mcp/server/trueforge/endpoint');
   configureOutboundUrlGuard({
     enabled: configuration.NETWORK_POLICY_ENABLED,
     allowedHosts: configuration.OUTBOUND_URL_ALLOWED_HOSTS,
@@ -69,14 +67,8 @@ try {
       bodyTimeoutMs: configuration.MCP_HTTP_BODY_TIMEOUT_MS,
       maxRetries: configuration.MCP_HTTP_MAX_RETRIES,
       idempotent: false,
+      trustedEndpoint: trueForgeMcpTrustedEndpoint,
     },
-  });
-  const tls = { enabled: configuration.MTLS_ENABLED, dir: configuration.MTLS_CERTS_DIR };
-  const trustedFetch = createTlsFetch(tls) ?? fetch;
-  const serverUrl = normalizeTlsUrl({ url: configuration.SERVER_URL, enabled: tls.enabled });
-  configureTrustedMcpEndpoint({
-    url: new URL('/mcp', serverUrl).href,
-    fetch: withTrueForgeMcpHeader(trustedFetch),
   });
 } catch (error) {
   console.error(

@@ -31,6 +31,11 @@ export interface OutboundFetchOptions {
    * timeouts and 409/520/524 are not retried.
    */
   idempotent: boolean;
+  /** Exact server-owned endpoint allowed to bypass SSRF through a caller-supplied fetch. */
+  trustedEndpoint?: {
+    url: string;
+    fetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+  };
 }
 
 export interface OutboundFetch {
@@ -484,8 +489,25 @@ export function createOutboundFetch(options: OutboundFetchOptions): OutboundFetc
   });
   const maxRetries = options.maxRetries;
   const idempotent = options.idempotent;
+  const trustedEndpoint =
+    options.trustedEndpoint === undefined
+      ? undefined
+      : { url: new URL(options.trustedEndpoint.url).href, fetch: options.trustedEndpoint.fetch };
   return {
-    fetch: (input, init) => withOutboundHttpRetries(input, init ?? {}, agent, { maxRetries, idempotent }),
+    fetch: (input, init) => {
+      if (trustedEndpoint !== undefined) {
+        let url: string | undefined;
+        try {
+          url = new URL(input instanceof Request ? input.url : input).href;
+        } catch {
+          // The guarded fetch below produces the standard blocked-URL error.
+        }
+        if (url === trustedEndpoint.url) {
+          return trustedEndpoint.fetch(input, { ...init, redirect: 'manual' });
+        }
+      }
+      return withOutboundHttpRetries(input, init ?? {}, agent, { maxRetries, idempotent });
+    },
     close: async () => {
       await agent.close().catch(() => undefined);
     },

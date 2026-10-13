@@ -1,7 +1,6 @@
 import http from 'node:http';
 import {
   configureOutboundFetches,
-  configureTrustedMcpEndpoint,
   defaultMcpOutboundFetchOptions,
   defaultModelOutboundFetchOptions,
   defaultOutboundFetchOptions,
@@ -13,7 +12,6 @@ import { assertSafeOutboundUrl, configureOutboundUrlGuard } from '../../../src/c
 
 function resetOutbound(): void {
   configureOutboundUrlGuard({ allowedHosts: [], blockedHosts: [] });
-  configureTrustedMcpEndpoint(undefined);
   configureOutboundFetches({
     outbound: defaultOutboundFetchOptions(),
     model: defaultModelOutboundFetchOptions(),
@@ -355,9 +353,16 @@ describe('modelSsrfFetch', () => {
 describe('mcpSsrfFetch', () => {
   it('bypasses SSRF only for the exact configured trusted MCP endpoint', async () => {
     const trustedFetch = jest.fn(async () => new Response(null, { status: 200 }));
-    configureTrustedMcpEndpoint({
-      url: 'http://127.0.0.1:8790/mcp',
-      fetch: trustedFetch,
+    configureOutboundFetches({
+      outbound: defaultOutboundFetchOptions(),
+      model: defaultModelOutboundFetchOptions(),
+      mcp: {
+        ...defaultMcpOutboundFetchOptions(),
+        trustedEndpoint: {
+          url: 'http://127.0.0.1:8790/mcp',
+          fetch: trustedFetch,
+        },
+      },
     });
 
     await expect(mcpSsrfFetch('http://127.0.0.1:8790/mcp', { method: 'POST' })).resolves.toMatchObject({

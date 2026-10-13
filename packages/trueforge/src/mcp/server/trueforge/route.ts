@@ -7,18 +7,13 @@
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
-import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../../../auth/identity';
-import { createTrueForgeClient } from './client';
-import { X_TFG_TRUEFORGE_MCP } from './headers';
+import { createTrueForgeMcpClient, X_TFG_TRUEFORGE_MCP } from './endpoint';
 import { createTrueForgeMcpServer } from './server';
 
 export interface TrueForgeMcpRouterDeps {
   resolveRequestContext: ResolveRequestContext;
-  /** Trusted self-origin base URL */
-  serverUrl: string;
   version: string;
-  logger: Logger;
 }
 
 export function requireTrueForgeMcpHeader(raw: string | undefined): void {
@@ -35,10 +30,7 @@ export function createTrueForgeMcpRouter(deps: TrueForgeMcpRouterDeps): Hono {
 
     // Built per request: the server's tools close over this caller's credential, and stateless
     // Streamable HTTP wants a fresh server+transport per request to isolate concurrent callers.
-    const client = createTrueForgeClient({
-      baseUrl: deps.serverUrl,
-      userCredential: requestContext.user_credential,
-    });
+    const client = createTrueForgeMcpClient({ userCredential: requestContext.user_credential });
     const server = createTrueForgeMcpServer({ client, version: deps.version });
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
     await server.connect(transport);
