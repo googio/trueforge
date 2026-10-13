@@ -185,10 +185,13 @@ export interface AppendToEventsInput extends TurnProgressKeys {
   events: PersistedTurnEvent[];
 }
 
-export interface InsertTurnInboundEventsInput extends TurnProgressKeys {
+export interface InsertTurnInboundEventsInput {
+  session_id: string;
+  turn_id: string;
   /**
    * Caller mints `event_id` (monotonic ULID) — same contract as session_event.
    * Empty array is a no-op. Every row is stamped with this input's `turn_id`.
+   * Any caller may append while the turn is running or paused.
    */
   events: {
     event_id: string;

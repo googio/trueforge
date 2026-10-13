@@ -619,7 +619,6 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
         }),
       );
       await store.appendToEvents({
-        active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
         session_id: sessionId,
         turn_id: 'turn-1',
         events: [makeTurnCreatedEvent('turn-1'), makeModelMessageEvent()],
@@ -777,7 +776,6 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
       ).rejects.toBeInstanceOf(TurnNotFoundError);
       await expect(
         store.insertTurnInboundEvents({
-          active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
           session_id: sessionId,
           turn_id: 'turn-1',
           events: [
@@ -2956,7 +2954,6 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
       };
 
       await store.insertTurnInboundEvents({
-        active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
         session_id: sessionId,
         turn_id: 'turn-1',
         events: [later, earlier],
@@ -2964,7 +2961,6 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
 
       await expect(
         store.insertTurnInboundEvents({
-          active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
           session_id: sessionId,
           turn_id: 'turn-1',
           events: [later],
@@ -2987,7 +2983,6 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
       };
       await expect(
         store.insertTurnInboundEvents({
-          active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
           session_id: sessionId,
           turn_id: 'turn-1',
           events: [fresh, later],
@@ -3000,7 +2995,6 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
       const dupId = 'evt-dup';
       await expect(
         store.insertTurnInboundEvents({
-          active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
           session_id: sessionId,
           turn_id: 'turn-1',
           events: [
@@ -3035,7 +3029,6 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
       await finishTurn(store, 'turn-1');
       await expect(
         store.insertTurnInboundEvents({
-          active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
           session_id: sessionId,
           turn_id: 'turn-1',
           events: [
@@ -3078,7 +3071,6 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
           turn_done_event: makeTurnDoneEvent(cancelledState),
         }),
         store.insertTurnInboundEvents({
-          active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
           session_id: sessionId,
           turn_id: 'turn-1',
           events: [inbound],
@@ -3099,7 +3091,6 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
       await seedSession(store);
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
       await store.insertTurnInboundEvents({
-        active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
         session_id: sessionId,
         turn_id: 'turn-1',
         events: [
@@ -3118,7 +3109,6 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
       await store.deleteSession({ tenant_id: tenant, session_id: sessionId });
       await expect(
         store.insertTurnInboundEvents({
-          active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
           session_id: sessionId,
           turn_id: 'turn-1',
           events: [
@@ -3550,7 +3540,6 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
       await seedSession(store);
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
       await store.appendToEvents({
-        active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
         session_id: sessionId,
         turn_id: 'turn-1',
         events: [makeTurnCreatedEvent('turn-1'), makeModelMessageEvent()],
