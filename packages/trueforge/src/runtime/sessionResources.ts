@@ -14,6 +14,7 @@ import {
 import { HTTPException } from 'hono/http-exception';
 import { join } from 'node:path';
 import type { Logger } from 'winston';
+import type { RequestContext } from '../auth/identity';
 import configuration from '../config';
 import type { IMcpServerStore, IMcpServerWithAuthStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
@@ -34,6 +35,41 @@ import {
 import type { ReasoningEffort } from '../schemas/modelProvider';
 import { DEFAULT_SANDBOX_ENVIRONMENT_NAME } from '../schemas/sandboxEnvironment';
 import { hasConfiguredWebSearchProvider } from '../websearch/providers';
+
+export interface GetMcpConnectionInput {
+  tenant_id: string;
+  name: string;
+  userRef: string;
+  turnMetadata?: TurnMetadata;
+}
+
+export type GetMcpConnection = (input: GetMcpConnectionInput) => Promise<ResolvedMcpServer | undefined>;
+
+/**
+ * Request-scoped MCP resolver. The built-in server is available only with a live request
+ * context; its `null` credential is valid in standalone mode.
+ */
+export function createMcpConnectionResolver(input: {
+  store: IMcpServerWithAuthStore;
+  requestContext?: RequestContext;
+}): GetMcpConnection {
+  return async params => {
+    if (params.name === TRUEFORGE_CONNECTOR_NAME) {
+      if (input.requestContext === undefined) {
+        return undefined;
+      }
+      return {
+        ...trueForgeMcpConnection,
+        description: 'Manage resources in this TrueForge deployment.',
+        headers:
+          input.requestContext.user_credential === null
+            ? {}
+            : { Authorization: `Bearer ${input.requestContext.user_credential}` },
+      };
+    }
+    return resolveMcpServer({ ...params, store: input.store });
+  };
+}
 
 /** Split `provider/model` FQN. Returns undefined when the shape is not exactly one slash. */
 export function parseModelFqn(name: string): { providerName: string; modelName: string } | undefined {
@@ -135,13 +171,6 @@ export async function resolveMcpServer({
     userRef,
     ...(turnMetadata === undefined ? {} : { turnMetadata }),
   });
-  if (name === TRUEFORGE_CONNECTOR_NAME) {
-    return {
-      ...trueForgeMcpConnection,
-      headers,
-      description: 'Manage resources in this TrueForge deployment.',
-    };
-  }
   return {
     url: record.manifest.url,
     description: record.manifest.description,
@@ -305,10 +334,11 @@ export async function validateAgentSpec({
 
   const requestedMcpServers = spec.mcp_servers ?? [];
   if (requestedMcpServers.length > 0) {
-    const names = requestedMcpServers.map(server => server.name);
-    const records = await mcpServerStore.listServers({ tenant_id, names });
+    const configuredRequests = requestedMcpServers.filter(server => server.name !== TRUEFORGE_CONNECTOR_NAME);
+    const names = configuredRequests.map(server => server.name);
+    const records = names.length === 0 ? [] : await mcpServerStore.listServers({ tenant_id, names });
     const configuredNames = new Set(records.map(record => record.name));
-    const unknown = requestedMcpServers.find(server => !configuredNames.has(server.name));
+    const unknown = configuredRequests.find(server => !configuredNames.has(server.name));
     if (unknown !== undefined) {
       throw new HTTPException(422, {
         message: `Unknown MCP server "${unknown.name}" — not configured`,
