@@ -14,6 +14,7 @@ import type { Database, TurnThreadCheckpoint } from '../../types';
 import { sortedByAppendId } from '../sqlExpressions';
 import {
   assertTurnNonTerminal,
+  assertTurnOwned,
   assertTurnRunning,
   classifyNonTerminalTurnThreadWriteFailure,
   classifyTurnFenceWriteFailure,
@@ -28,10 +29,14 @@ type DbOrTrx = Kysely<Database> | Transaction<Database>;
  */
 export async function addThreads(db: Kysely<Database>, input: AddThreadsInput): Promise<void> {
   await db.transaction().execute(async trx => {
-    await assertTurnRunning(trx, {
+    await assertTurnOwned(trx, {
       session_id: input.session_id,
       turn_id: input.turn_id,
       active_executor_id: input.active_executor_id,
+    });
+    await assertTurnRunning(trx, {
+      session_id: input.session_id,
+      turn_id: input.turn_id,
     });
 
     const now = nowIso();
@@ -178,10 +183,14 @@ export async function removeThreads(db: Kysely<Database>, input: RemoveThreadsIn
   }
 
   await db.transaction().execute(async trx => {
-    await assertTurnRunning(trx, {
+    await assertTurnOwned(trx, {
       session_id: input.session_id,
       turn_id: input.turn_id,
       active_executor_id: input.active_executor_id,
+    });
+    await assertTurnRunning(trx, {
+      session_id: input.session_id,
+      turn_id: input.turn_id,
     });
 
     await trx
@@ -248,6 +257,7 @@ async function fencedTurnThreadContextUpdate(
   const { keys, thread_id, context, replace_array } = args;
 
   await db.transaction().execute(async trx => {
+    await assertTurnOwned(trx, keys);
     await assertTurnNonTerminal(trx, keys);
 
     const now = nowIso();

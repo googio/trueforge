@@ -536,6 +536,7 @@ export class InMemorySessionStore<
   }
 
   async appendToEvents(input: AppendToEventsInput): Promise<void> {
+    this.requireOwnedTurn(input);
     this.requireNonTerminalTurn(input);
     const tKey = turnKey(input);
     const list = this.events.get(tKey);
@@ -547,7 +548,7 @@ export class InMemorySessionStore<
   }
 
   async patchThreadsMCPAuth(input: PatchThreadsMCPAuthInput): Promise<void> {
-    const turn = this.requireNonTerminalTurn(input.session_id, input.turn_id);
+    const turn = this.requireNonTerminalTurn(input);
     const threads = input.thread_ids.map(threadId => {
       const thread = turn.snapshot.threads[threadId];
       if (!thread) {
@@ -566,6 +567,7 @@ export class InMemorySessionStore<
       return;
     }
     this.requireSession(input.session_id);
+    this.requireOwnedTurn(input);
     this.requireNonTerminalTurn(input);
     const tKey = turnKey(input);
     let list = this.inboundEvents.get(tKey);
@@ -640,12 +642,8 @@ export class InMemorySessionStore<
     return turn;
   }
 
-  private requireRunningTurn(input: {
-    session_id: string;
-    turn_id: string;
-    active_executor_id: string;
-  }): TurnRecord<TTurnCustom> {
-    const turn = this.requireOwnedTurn(input);
+  private requireRunningTurn(input: { session_id: string; turn_id: string }): TurnRecord<TTurnCustom> {
+    const turn = this.requireTurn(input.session_id, input.turn_id);
     if (turn.state.status === 'paused') {
       throw new SessionStoreInvariantError(`expected running state for turn ${input.turn_id}, got paused`);
     }
@@ -655,12 +653,8 @@ export class InMemorySessionStore<
     return turn;
   }
 
-  private requireNonTerminalTurn(input: {
-    session_id: string;
-    turn_id: string;
-    active_executor_id: string;
-  }): TurnRecord<TTurnCustom> {
-    const turn = this.requireOwnedTurn(input);
+  private requireNonTerminalTurn(input: { session_id: string; turn_id: string }): TurnRecord<TTurnCustom> {
+    const turn = this.requireTurn(input.session_id, input.turn_id);
     if (turn.state.status !== 'running' && turn.state.status !== 'paused') {
       throw new TurnNotRunningError(input.turn_id, turn.state);
     }
@@ -668,6 +662,7 @@ export class InMemorySessionStore<
   }
 
   async addThreads(input: AddThreadsInput): Promise<void> {
+    this.requireOwnedTurn(input);
     const turn = this.requireRunningTurn(input);
     for (const thread of input.threads) {
       turn.snapshot.threads[thread.thread_id] = deepCopy(thread);
@@ -680,6 +675,7 @@ export class InMemorySessionStore<
     if (input.thread_ids.length === 0) {
       return;
     }
+    this.requireOwnedTurn(input);
     const turn = this.requireRunningTurn(input);
     for (const id of input.thread_ids) {
       Reflect.deleteProperty(turn.snapshot.threads, id);
@@ -689,6 +685,7 @@ export class InMemorySessionStore<
   }
 
   async appendToThreadContext(input: AppendToThreadContextInput): Promise<void> {
+    this.requireOwnedTurn(input);
     const turn = this.requireNonTerminalTurn(input);
     const thread = turn.snapshot.threads[input.thread_id];
     if (!thread) {
@@ -706,6 +703,7 @@ export class InMemorySessionStore<
   }
 
   async overwriteThreadContext(input: OverwriteThreadContextInput): Promise<void> {
+    this.requireOwnedTurn(input);
     const turn = this.requireNonTerminalTurn(input);
     const threadId = input.event.thread_id;
     const thread = turn.snapshot.threads[threadId];
@@ -719,6 +717,7 @@ export class InMemorySessionStore<
   }
 
   async patchMCPServers(input: PatchMCPServersInput): Promise<void> {
+    this.requireOwnedTurn(input);
     const turn = this.requireNonTerminalTurn(input);
     turn.snapshot.mcp_servers ??= {};
     for (const server of input.mcp_servers) {
@@ -729,6 +728,7 @@ export class InMemorySessionStore<
   }
 
   async patchSandboxInfo(input: PatchSandboxInfoInput): Promise<void> {
+    this.requireOwnedTurn(input);
     const turn = this.requireRunningTurn(input);
     turn.snapshot.sandbox_info = deepCopy(input.sandbox_info);
     turn.updated_at = new Date();
@@ -736,6 +736,7 @@ export class InMemorySessionStore<
   }
 
   async patchThreadCapabilityState(input: PatchThreadCapabilityStateInput): Promise<void> {
+    this.requireOwnedTurn(input);
     const turn = this.requireRunningTurn(input);
     const thread = turn.snapshot.threads[input.thread_id];
     if (!thread) {

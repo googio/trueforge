@@ -185,7 +185,7 @@ function terminalTurnState(state: TurnState, turn_id: string): TerminalTurnState
  * network call. Under READ COMMITTED, FOR SHARE re-checks the predicate after a
  * lock wait, so a committed freeze empties the fence and the write inserts 0 rows;
  * error classification happens on that rare 0-row path.
- * Multi-statement turn-scoped writes use {@link assertTurnRunning} instead.
+ * Multi-statement writes call assertTurnOwned, then a status assert.
  */
 export function turnRunningFence(db: TurnFenceDb, keys: TurnKeys) {
   return db
@@ -247,11 +247,10 @@ export async function classifyNonTerminalTurnThreadWriteFailure(
   throw new SessionStoreInvariantError(`thread ${thread_id} not found in turn ${keys.turn_id}`);
 }
 
-export async function assertTurnRunning(db: DbOrTrx, keys: TurnKeys): Promise<void> {
-  // SELECT ... FOR SHARE serializes against freezeAndGetTurn's state UPDATE.
+export async function assertTurnOwned(db: DbOrTrx, keys: TurnKeys): Promise<void> {
   const row = await db
     .selectFrom('turn')
-    .select(['state', 'active_executor_id'])
+    .select('active_executor_id')
     .where('session_id', '=', keys.session_id)
     .where('turn_id', '=', keys.turn_id)
     .forShare()
@@ -261,15 +260,30 @@ export async function assertTurnRunning(db: DbOrTrx, keys: TurnKeys): Promise<vo
     throw new TurnNotFoundError(keys.turn_id);
   }
   throwIfExecutorMismatch(keys, row.active_executor_id);
+}
+
+export async function assertTurnRunning(db: DbOrTrx, keys: { session_id: string; turn_id: string }): Promise<void> {
+  // SELECT ... FOR SHARE serializes against freezeAndGetTurn's state UPDATE.
+  const row = await db
+    .selectFrom('turn')
+    .select('state')
+    .where('session_id', '=', keys.session_id)
+    .where('turn_id', '=', keys.turn_id)
+    .forShare()
+    .executeTakeFirst();
+
+  if (!row) {
+    throw new TurnNotFoundError(keys.turn_id);
+  }
   if (row.state.status !== 'running') {
     throw new TurnNotRunningError(keys.turn_id, terminalTurnState(row.state, keys.turn_id));
   }
 }
 
-export async function assertTurnNonTerminal(db: DbOrTrx, keys: TurnKeys): Promise<void> {
+export async function assertTurnNonTerminal(db: DbOrTrx, keys: { session_id: string; turn_id: string }): Promise<void> {
   const row = await db
     .selectFrom('turn')
-    .select(['state', 'active_executor_id'])
+    .select('state')
     .where('session_id', '=', keys.session_id)
     .where('turn_id', '=', keys.turn_id)
     .forShare()
@@ -278,7 +292,6 @@ export async function assertTurnNonTerminal(db: DbOrTrx, keys: TurnKeys): Promis
   if (!row) {
     throw new TurnNotFoundError(keys.turn_id);
   }
-  throwIfExecutorMismatch(keys, row.active_executor_id);
   if (row.state.status !== 'running' && row.state.status !== 'paused') {
     throw new TurnNotRunningError(keys.turn_id, terminalTurnState(row.state, keys.turn_id));
   }

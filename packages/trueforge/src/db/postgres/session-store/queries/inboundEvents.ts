@@ -9,7 +9,7 @@ import { firstCollidingEventId, firstDuplicateEventIdInBatch } from '../../../tu
 import { isUniqueViolation } from '../../client';
 import { json } from '../../sqlExpressions';
 import type { Database } from '../../types';
-import { assertTurnNonTerminal, type TurnKeys } from './turns';
+import { assertTurnNonTerminal, assertTurnOwned, type TurnKeys } from './turns';
 
 async function requireSession(db: Kysely<Database>, sessionId: string): Promise<void> {
   const row = await db
@@ -69,6 +69,7 @@ export async function insertTurnInboundEvents(
   try {
     // Ensure the turn does not stop before we insert events.
     await db.transaction().execute(async trx => {
+      await assertTurnOwned(trx, keys);
       await assertTurnNonTerminal(trx, keys);
       await trx
         .insertInto('turn_inbound_events')
