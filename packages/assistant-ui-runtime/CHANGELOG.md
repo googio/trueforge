@@ -1,5 +1,13 @@
 # @truefoundry/trueforge-assistant-ui-runtime
 
+## 0.179.0-rc.1
+
+### Patch Changes
+
+- 1513e91: Show cancelled turn reasons in chat and session detail via an orange cancelled banner, projecting the wire reason on message metadata from turn.done (including live commits).
+- f5672f1: Show MCP auth resume turn boundaries and unanswered ask_user prompts in Sessions view.
+- 694a572: Reject duplicate sandbox environment names on create (POST) instead of overwriting via upsert.
+
 ## 0.178.0
 
 ### Patch Changes

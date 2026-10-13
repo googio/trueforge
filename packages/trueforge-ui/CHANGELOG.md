@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.179.0-rc.1
+
+### Patch Changes
+
+- 1513e91: Show cancelled turn reasons in chat and session detail via an orange cancelled banner, projecting the wire reason on message metadata from turn.done (including live commits).
+- bf619ad: Show Web search as a Built-in connector toggle in New Chat, persist an explicit chat draft choice across New Chat / reload, and restore capability-forced off only when the user never chose off.
+- 18d4051: Keep draft spec sync on its existing debounce by flushing the agent config drawer only when it unmounts.
+- 95f5c5c: Remove the sandbox-environments frontend feature flag and always enable environments UI.
+- 6c07afa: Toast API errors when creating or updating a sandbox environment so failures are visible outside the drawer form.
+- 84f71bf: Confirm before opening external markdown links or loading external markdown images, with per-host "Don't ask again" in localStorage.
+- f5672f1: Show MCP auth resume turn boundaries and unanswered ask_user prompts in Sessions view.
+- 1674b71: Allow opening model settings dropdown by clicking the model parameters summary in Agent Config.
+- 694a572: Reject duplicate sandbox environment names on create (POST) instead of overwriting via upsert.
+- e25945d: Add configurable sandbox resource caps and limit environment variable and secret names in the UI.
+- 6b42368: Point the Environments secrets "Learn more" link at the Sandbox docs section on how environment changes reach a running session.
+- 09f07f0: Show the sandbox disabled-with-skills tooltip only on the switch, not the whole row.
+- 7a81826: Explain higher session-level turn counts when the tip lineage is shorter than session total
+- Updated dependencies [1513e91]
+- Updated dependencies [f5672f1]
+- Updated dependencies [694a572]
+  - @truefoundry/trueforge-assistant-ui-runtime@0.179.0-rc.1
+  - @truefoundry/trueforge-sdk@0.179.0-rc.1
+
 ## 0.178.0
 
 ### Patch Changes
