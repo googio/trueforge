@@ -19,6 +19,7 @@ import type { Context } from 'hono';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { createTlsFetch, normalizeTlsUrl } from './http/tls';
+import { withTrueForgeMcpHeader } from './mcp/server/trueforge/headers';
 import {
   ensureLocalSandboxRootParent,
   prepareCodeModeSocketParent,
@@ -73,7 +74,10 @@ try {
   const tls = { enabled: configuration.MTLS_ENABLED, dir: configuration.MTLS_CERTS_DIR };
   const trustedFetch = createTlsFetch(tls) ?? fetch;
   const serverUrl = normalizeTlsUrl({ url: configuration.SERVER_URL, enabled: tls.enabled });
-  configureTrustedMcpEndpoint({ url: new URL('/mcp', serverUrl).href, fetch: trustedFetch });
+  configureTrustedMcpEndpoint({
+    url: new URL('/mcp', serverUrl).href,
+    fetch: withTrueForgeMcpHeader(trustedFetch),
+  });
 } catch (error) {
   console.error(
     'Failed to start server: Failed to load configuration:',

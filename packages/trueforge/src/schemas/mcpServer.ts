@@ -11,7 +11,7 @@
  */
 import { z } from '@hono/zod-openapi';
 import type { OAuthToken } from '../mcp/auth/types';
-import { isReservedResourceName, NameSchema } from './common';
+import { NameSchema } from './common';
 
 const MCP_SERVER_TYPES = ['remote', 'truefoundry'] as const;
 
@@ -84,12 +84,6 @@ export const McpServerManifestSchema = z
   .discriminatedUnion('type', [RemoteMcpServerManifestSchema, TrueFoundryMcpServerManifestSchema])
   .openapi('MCPServerManifest');
 
-/** Request-body manifest — rejects reserved first-party names (responses may still carry them). */
-const McpServerManifestRequestSchema = McpServerManifestSchema.refine(
-  manifest => !isReservedResourceName(manifest.name),
-  { message: 'MCP server name is reserved, cannot be used', path: ['name'] },
-).openapi('MCPServerManifestRequest');
-
 export const McpAuthStatusSchema = z
   .object({
     status: z
@@ -116,14 +110,14 @@ export const ConfiguredMcpServerSchema = z
 
 export const CreateMcpServerRequestSchema = z
   .object({
-    manifest: McpServerManifestRequestSchema,
+    manifest: McpServerManifestSchema,
   })
   .strict()
   .openapi('CreateMCPServerRequest');
 
 export const UpdateMcpServerRequestSchema = z
   .object({
-    manifest: McpServerManifestRequestSchema,
+    manifest: McpServerManifestSchema,
   })
   .strict()
   .openapi('UpdateMCPServerRequest');
