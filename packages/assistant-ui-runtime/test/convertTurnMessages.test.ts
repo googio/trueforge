@@ -1656,7 +1656,6 @@ describe('convertTurnMessages', () => {
               threadId: null,
               state: {
                 status: 'paused',
-                actionRequiredOnEvents: [{ id: 'approval-event' }],
               },
             },
           ]),
@@ -1774,7 +1773,7 @@ describe('convertTurnMessages', () => {
               id: 'pause-1',
               createdAt,
               threadId: null,
-              state: { status: 'paused', actionRequiredOnEvents: [] },
+              state: { status: 'paused' },
             },
             {
               type: 'user.tool_approval',
@@ -1843,7 +1842,7 @@ describe('convertTurnMessages', () => {
               id: 'pause-1',
               createdAt,
               threadId: null,
-              state: { status: 'paused', actionRequiredOnEvents: [] },
+              state: { status: 'paused' },
             },
             modelMessage({
               id: 'm2',
@@ -1907,7 +1906,6 @@ describe('convertTurnMessages', () => {
               threadId: null,
               state: {
                 status: 'paused',
-                actionRequiredOnEvents: [{ id: 'mcp-auth' }],
               },
             },
           ]),
@@ -2015,7 +2013,6 @@ describe('convertTurnMessages', () => {
               threadId: null,
               state: {
                 status: 'paused',
-                actionRequiredOnEvents: [{ id: 'mcp-auth' }],
               },
             },
           ]),
@@ -2117,7 +2114,6 @@ describe('convertTurnMessages', () => {
             createdAt,
             state: {
               status: 'paused',
-              actionRequiredOnEvents: [{ id: 'mcp-auth-1' }],
             },
           },
           activeStream: {
@@ -2134,7 +2130,6 @@ describe('convertTurnMessages', () => {
               metadata: { custom: { pendingMcpAuth: true, mcpServers } },
               turnState: {
                 status: 'paused',
-                actionRequiredOnEvents: [{ id: 'mcp-auth-1' }],
               },
             },
             segmentStatus: 'paused',
@@ -2275,7 +2270,6 @@ describe('convertTurnMessages', () => {
               threadId: null,
               state: {
                 status: 'paused',
-                actionRequiredOnEvents: [{ id: 'approval-event' }],
               },
             },
           ]),
@@ -2341,7 +2335,6 @@ describe('convertTurnMessages', () => {
               threadId: null,
               state: {
                 status: 'paused',
-                actionRequiredOnEvents: [{ id: 'resp-req-1' }],
               },
             },
           ]),
@@ -3032,7 +3025,6 @@ describe('buildSnapshotFromSessionEvents', () => {
       sessionId: SESSION_ID,
       state: {
         status: 'paused',
-        actionRequiredOnEvents: [{ id: 'approval-required-1' }],
       },
       input: [{ type: 'user.message', content: 'run it' }],
       createdAt,
@@ -3080,7 +3072,6 @@ describe('buildSnapshotFromSessionEvents', () => {
           threadId: null,
           state: {
             status: 'paused',
-            actionRequiredOnEvents: [{ id: 'approval-required-1' }],
           },
         },
       },
@@ -3116,7 +3107,6 @@ describe('buildSnapshotFromSessionEvents', () => {
             threadId: null,
             state: {
               status: 'paused',
-              actionRequiredOnEvents: [{ id: 'approval-required-1' }],
             },
           },
         ]),
@@ -3142,7 +3132,6 @@ describe('buildSnapshotFromSessionEvents', () => {
       sessionId: SESSION_ID,
       state: {
         status: 'paused',
-        actionRequiredOnEvents: [],
       },
       input: [{ type: 'user.message', content: 'spawn two agents' }],
       createdAt,
@@ -3238,7 +3227,7 @@ describe('buildSnapshotFromSessionEvents', () => {
           id: 'tip-paused',
           createdAt,
           threadId: null,
-          state: { status: 'paused', actionRequiredOnEvents: [] },
+          state: { status: 'paused' },
         },
       },
     ];
@@ -3266,7 +3255,7 @@ describe('buildSnapshotFromSessionEvents', () => {
             id: 'tip-paused-replay',
             createdAt,
             threadId: null,
-            state: { status: 'paused', actionRequiredOnEvents: [] },
+            state: { status: 'paused' },
           },
         ]),
         snapshot.fold,
@@ -3282,7 +3271,6 @@ describe('buildSnapshotFromSessionEvents', () => {
       sessionId: SESSION_ID,
       state: {
         status: 'paused',
-        actionRequiredOnEvents: [{ id: 'mcp-auth-1' }],
       },
       input: [{ type: 'user.message', content: 'use github' }],
       createdAt,
@@ -3322,7 +3310,6 @@ describe('buildSnapshotFromSessionEvents', () => {
           threadId: null,
           state: {
             status: 'paused',
-            actionRequiredOnEvents: [{ id: 'mcp-auth-1' }],
           },
         },
       },
