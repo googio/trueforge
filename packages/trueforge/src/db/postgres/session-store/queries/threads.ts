@@ -15,8 +15,7 @@ import { json, jsonbSet } from '../../sqlExpressions';
 import type { Database, TurnThreadCheckpoint } from '../../types';
 import { values } from '../sqlExpressions';
 import {
-  assertTurnOwned,
-  assertTurnRunning,
+  assertOwnedRunningTurn,
   classifyNonTerminalTurnThreadWriteFailure,
   classifyTurnFenceWriteFailure,
   turnNonTerminalFence,
@@ -41,14 +40,10 @@ interface CapabilityStateInsertRow {
  */
 export async function addThreads(db: Kysely<Database>, input: AddThreadsInput): Promise<void> {
   await db.transaction().execute(async trx => {
-    await assertTurnOwned(trx, {
+    await assertOwnedRunningTurn(trx, {
       session_id: input.session_id,
       turn_id: input.turn_id,
       active_executor_id: input.active_executor_id,
-    });
-    await assertTurnRunning(trx, {
-      session_id: input.session_id,
-      turn_id: input.turn_id,
     });
 
     const now = new Date();

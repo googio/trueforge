@@ -175,7 +175,10 @@ function terminalTurnState(state: TurnState, turn_id: string): TerminalTurnState
   }
 }
 
-async function loadTurnFence(db: DbOrTrx, keys: TurnKeys): Promise<LoadedTurnFence | undefined> {
+async function loadTurnFence(
+  db: DbOrTrx,
+  keys: { session_id: string; turn_id: string },
+): Promise<LoadedTurnFence | undefined> {
   const row = await db
     .selectFrom('turn')
     .select([jsonText<TurnState>(sql.ref('state')).as('state'), 'active_executor_id'])
@@ -211,47 +214,41 @@ export async function classifyNonTerminalTurnThreadWriteFailure(
   throw new SessionStoreInvariantError(`thread ${thread_id} not found in turn ${keys.turn_id}`);
 }
 
-export async function assertTurnOwned(db: DbOrTrx, keys: TurnKeys): Promise<void> {
-  const row = await db
-    .selectFrom('turn')
-    .select('active_executor_id')
-    .where('session_id', '=', keys.session_id)
-    .where('turn_id', '=', keys.turn_id)
-    .executeTakeFirst();
-  if (!row) {
-    throw new TurnNotFoundError(keys.turn_id);
+function throwUnlessRunning(turnId: string, state: TurnState): void {
+  if (state.status !== 'running') {
+    throw new TurnNotRunningError(turnId, terminalTurnState(state, turnId));
   }
-  throwIfExecutorMismatch(keys, row.active_executor_id);
 }
 
-export async function assertTurnRunning(db: DbOrTrx, keys: { session_id: string; turn_id: string }): Promise<void> {
-  const row = await db
-    .selectFrom('turn')
-    .select(jsonText<TurnState>(sql.ref('state')).as('state'))
-    .where('session_id', '=', keys.session_id)
-    .where('turn_id', '=', keys.turn_id)
-    .executeTakeFirst();
+function throwUnlessNonTerminal(turnId: string, state: TurnState): void {
+  if (state.status !== 'running' && state.status !== 'paused') {
+    throw new TurnNotRunningError(turnId, terminalTurnState(state, turnId));
+  }
+}
+
+async function requireTurnFence(db: DbOrTrx, keys: { session_id: string; turn_id: string }): Promise<LoadedTurnFence> {
+  const row = await loadTurnFence(db, keys);
   if (!row) {
     throw new TurnNotFoundError(keys.turn_id);
   }
-  if (row.state.status !== 'running') {
-    throw new TurnNotRunningError(keys.turn_id, terminalTurnState(row.state, keys.turn_id));
-  }
+  return row;
+}
+
+export async function assertOwnedRunningTurn(db: DbOrTrx, keys: TurnKeys): Promise<void> {
+  const row = await requireTurnFence(db, keys);
+  throwIfExecutorMismatch(keys, row.active_executor_id);
+  throwUnlessRunning(keys.turn_id, row.state);
+}
+
+export async function assertOwnedNonTerminalTurn(db: DbOrTrx, keys: TurnKeys): Promise<void> {
+  const row = await requireTurnFence(db, keys);
+  throwIfExecutorMismatch(keys, row.active_executor_id);
+  throwUnlessNonTerminal(keys.turn_id, row.state);
 }
 
 export async function assertTurnNonTerminal(db: DbOrTrx, keys: { session_id: string; turn_id: string }): Promise<void> {
-  const row = await db
-    .selectFrom('turn')
-    .select(jsonText<TurnState>(sql.ref('state')).as('state'))
-    .where('session_id', '=', keys.session_id)
-    .where('turn_id', '=', keys.turn_id)
-    .executeTakeFirst();
-  if (!row) {
-    throw new TurnNotFoundError(keys.turn_id);
-  }
-  if (row.state.status !== 'running' && row.state.status !== 'paused') {
-    throw new TurnNotRunningError(keys.turn_id, terminalTurnState(row.state, keys.turn_id));
-  }
+  const row = await requireTurnFence(db, keys);
+  throwUnlessNonTerminal(keys.turn_id, row.state);
 }
 
 interface CapabilityAggRow {
