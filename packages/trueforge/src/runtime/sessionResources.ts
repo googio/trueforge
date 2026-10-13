@@ -22,6 +22,8 @@ import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { ISkillStore } from '../db/skillStore';
 import type { TurnMetadata } from '../db/turnMetadata';
 import type { IWebSearchProviderStore } from '../db/webSearchProviderStore';
+import { trueForgeMcpConnection } from '../mcp/server/trueforge/route';
+import { TRUEFORGE_CONNECTOR_NAME } from '../mcp/server/trueforge/server';
 import { LocalSandboxProvider } from '../sandbox/local/provider/LocalSandboxProvider';
 import { getCachedLocalSandboxSupport, isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
 import {
@@ -128,14 +130,22 @@ export async function resolveMcpServer({
   if (record === undefined) {
     return undefined;
   }
+  const headers = store.resolveInvokeHeaders({
+    record,
+    userRef,
+    ...(turnMetadata === undefined ? {} : { turnMetadata }),
+  });
+  if (name === TRUEFORGE_CONNECTOR_NAME) {
+    return {
+      ...trueForgeMcpConnection,
+      headers,
+      description: 'Manage resources in this TrueForge deployment.',
+    };
+  }
   return {
     url: record.manifest.url,
     description: record.manifest.description,
-    headers: store.resolveInvokeHeaders({
-      record,
-      userRef,
-      ...(turnMetadata === undefined ? {} : { turnMetadata }),
-    }),
+    headers,
   };
 }
 

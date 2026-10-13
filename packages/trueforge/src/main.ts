@@ -40,7 +40,6 @@ try {
     getPublicUiBasePath,
     TrueForgeAuthMode,
   } = await import('./config'));
-  const { trueForgeMcpTrustedEndpoint } = await import('./mcp/server/trueforge/endpoint');
   configureOutboundUrlGuard({
     enabled: configuration.NETWORK_POLICY_ENABLED,
     allowedHosts: configuration.OUTBOUND_URL_ALLOWED_HOSTS,
@@ -67,7 +66,6 @@ try {
       bodyTimeoutMs: configuration.MCP_HTTP_BODY_TIMEOUT_MS,
       maxRetries: configuration.MCP_HTTP_MAX_RETRIES,
       idempotent: false,
-      trustedEndpoint: trueForgeMcpTrustedEndpoint,
     },
   });
 } catch (error) {

@@ -14,6 +14,7 @@ import type { ToolSchema } from './IMCPServer';
 /** Networking for remote (url-based) MCP servers, kept separate so it can be mocked in tests. */
 
 export type RemoteMcpTransportType = 'streamable-http' | 'sse';
+export type RemoteMcpFetch = FetchLike;
 
 export interface RemoteMcpConnection {
   readonly transportType: RemoteMcpTransportType;
@@ -177,6 +178,7 @@ function buildConnection(
 export async function connectRemoteMcp(params: {
   url: string;
   headers: Record<string, string>;
+  fetch?: RemoteMcpFetch;
   sessionId?: string | undefined;
   knownTransportType?: RemoteMcpTransportType | undefined;
   requestTimeoutMs: number;
@@ -188,7 +190,10 @@ export async function connectRemoteMcp(params: {
 }): Promise<RemoteMcpConnection> {
   const url = new URL(params.url);
   const requestOptions = { signal: params.signal };
-  const fetchFn = withMaxResponseBytes(mcpSsrfFetch, params.maxResponseBytes ?? DEFAULT_MAX_MCP_RESPONSE_BYTES);
+  const fetchFn = withMaxResponseBytes(
+    params.fetch ?? mcpSsrfFetch,
+    params.maxResponseBytes ?? DEFAULT_MAX_MCP_RESPONSE_BYTES,
+  );
   const candidates = params.knownTransportType
     ? [params.knownTransportType, ...TRANSPORT_PROBE_ORDER.filter(t => t !== params.knownTransportType)]
     : TRANSPORT_PROBE_ORDER;

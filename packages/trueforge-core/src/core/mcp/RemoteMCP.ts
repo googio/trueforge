@@ -20,6 +20,7 @@ import {
   DEFAULT_MAX_MCP_RESPONSE_BYTES,
   isSessionExpiredError,
   type RemoteMcpConnection,
+  type RemoteMcpFetch,
   type RemoteMcpTransportType,
 } from './remoteMcpClient';
 
@@ -44,6 +45,7 @@ export interface ResolvedMcpServer {
   url: string;
   description: string;
   headers?: RemoteMcpHeaders;
+  fetch?: RemoteMcpFetch;
 }
 
 type ExecuteResult<T> = { result: T; wasInitialized: MCPServerInitInfo | undefined } | AuthRequiredResponse;
@@ -60,6 +62,7 @@ export class RemoteMCP implements ToolSource {
 
   private readonly url: string;
   private readonly headers: RemoteMcpHeaders;
+  private readonly fetch: RemoteMcpFetch | undefined;
   private readonly signal: AbortSignal;
   private readonly logger: Logger;
   private readonly tracing: AgentTracing;
@@ -85,6 +88,7 @@ export class RemoteMCP implements ToolSource {
     description: string | undefined;
     url: string;
     headers: RemoteMcpHeaders;
+    fetch?: RemoteMcpFetch;
     logger: Logger;
     tracing?: AgentTracing | undefined;
     sessionId?: string | undefined;
@@ -99,6 +103,7 @@ export class RemoteMCP implements ToolSource {
     this.description = params.description;
     this.url = params.url;
     this.headers = params.headers;
+    this.fetch = params.fetch;
     this.signal = params.signal;
     this.sessionId = params.sessionId;
     this.resolvedTransportType = params.transportType;
@@ -304,6 +309,7 @@ export class RemoteMCP implements ToolSource {
             const conn = await connectRemoteMcp({
               url: this.url,
               headers,
+              ...(this.fetch === undefined ? {} : { fetch: this.fetch }),
               sessionId: this.sessionId ?? undefined,
               // Hint from a prior connect
               knownTransportType: this.resolvedTransportType,

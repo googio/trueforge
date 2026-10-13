@@ -79,7 +79,7 @@ export type { ToolDefinition } from './mcp/LocalToolMCP';
 export { RemoteMCP } from './mcp/RemoteMCP';
 export type { RemoteMcpHeaders, ResolveHeadersResult, ResolvedMcpServer } from './mcp/RemoteMCP';
 export { DEFAULT_MAX_MCP_RESPONSE_BYTES } from './mcp/remoteMcpClient';
-export type { RemoteMcpConnection, RemoteMcpTransportType } from './mcp/remoteMcpClient';
+export type { RemoteMcpConnection, RemoteMcpFetch, RemoteMcpTransportType } from './mcp/remoteMcpClient';
 export type { ToolSelectorConfig } from './mcp/ToolSelectorPolicy';
 export {
   DEFAULT_DISABLE_TOOLS,
