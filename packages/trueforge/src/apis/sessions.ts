@@ -92,24 +92,38 @@ export interface SessionsRouterDeps {
   authorizer: Authorizer;
 }
 
+function cancelTurnOnThisExecutor(
+  activeTurns: ActiveTurnRegistry,
+  input: { sessionId: string; turnId: string; reason: CancellationReason },
+): boolean {
+  return activeTurns.cancelIfRunning({
+    sessionId: input.sessionId,
+    turnId: input.turnId,
+    abortReason: input.reason,
+  });
+}
+
 /**
  * Peer-facing cancel handler: aborts the turn if it runs in this process.
  * 200 = abort fired, 412 = not running here (treated by callers as a no-op).
  */
 export function cancelSessionTurnPeerHandler(activeTurns: ActiveTurnRegistry): RequestReplyRouteHandler {
-  return async request => {
+  // Synchronous by nature; the transport expects a Promise and require-await
+  // forbids an async fn without awaits.
+  return request => {
     const parsed = CancelPeerBodySchema.safeParse(request.body);
     if (!parsed.success) {
-      return { status: 400, body: { message: 'Invalid sessions/cancel payload' } };
+      return Promise.resolve({ status: 400, body: { message: 'Invalid sessions/cancel payload' } });
     }
-    const { session_id: sessionId, turn_id: turnId, reason } = parsed.data;
-    const found = await activeTurns.withTurnLock({ sessionId, turnId }, () => {
-      return Promise.resolve(activeTurns.cancelIfRunning({ sessionId, turnId, abortReason: reason }));
+    const found = cancelTurnOnThisExecutor(activeTurns, {
+      sessionId: parsed.data.session_id,
+      turnId: parsed.data.turn_id,
+      reason: parsed.data.reason,
     });
     if (!found) {
-      return { status: 412, body: { message: 'Turn is not running on this executor' } };
+      return Promise.resolve({ status: 412, body: { message: 'Turn is not running on this executor' } });
     }
-    return { status: 200, body: {} };
+    return Promise.resolve({ status: 200, body: {} });
   };
 }
 
@@ -187,13 +201,10 @@ export async function cancelSessionTurn(
     return;
   }
 
-  // Abort-or-freeze runs under the turn lock so it cannot interleave with an inbound-events apply.
-  await deps.activeTurns.withTurnLock({ sessionId, turnId }, async () => {
-    const aborted = deps.activeTurns.cancelIfRunning({ sessionId, turnId, abortReason: reason });
-    if (!aborted) {
-      await freezeTurnIgnoringMissing(deps.session, { turnId, reason });
-    }
-  });
+  const aborted = cancelTurnOnThisExecutor(deps.activeTurns, { sessionId, turnId, reason });
+  if (!aborted) {
+    await freezeTurnIgnoringMissing(deps.session, { turnId, reason });
+  }
 }
 
 /** Freeze a running turn; missing turns are a no-op (already gone). */

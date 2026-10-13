@@ -96,17 +96,6 @@ function trackRun(registry: ActiveTurnRegistry, turnId: string): AbortController
   return abortController;
 }
 
-function flushAsync(): Promise<void> {
-  return new Promise(resolve => setImmediate(resolve));
-}
-
-/** Holds the turn lock until `release` is called, standing in for an in-flight inbound-events POST. */
-function holdTurnLock(registry: ActiveTurnRegistry, turnId: string): { release: () => void; held: Promise<undefined> } {
-  const gate = Promise.withResolvers<undefined>();
-  const held = registry.withTurnLock({ sessionId: SESSION_ID, turnId }, () => gate.promise);
-  return { release: () => gate.resolve(undefined), held };
-}
-
 describe('cancelSessionTurn', () => {
   beforeEach(() => {
     redisRequestMock.mockReset();
@@ -294,27 +283,6 @@ describe('cancelSessionTurn', () => {
     );
   });
 
-  it('waits for the turn lock before freezing a locally owned turn', async () => {
-    const activeTurns = new ActiveTurnRegistry();
-    const turnId = 'turn-locked';
-    const session = sessionHandle();
-    const lock = holdTurnLock(activeTurns, turnId);
-
-    const cancel = cancelSessionTurn(
-      cancelDeps({ activeTurns, turn: turnRecord({ turnId, state: { status: 'running' } }), session }),
-      { turnId },
-    );
-    await flushAsync();
-    expect(session.freezeTurn).not.toHaveBeenCalled();
-
-    lock.release();
-    await Promise.all([lock.held, cancel]);
-    expect(session.freezeTurn).toHaveBeenCalledWith({
-      turn_id: turnId,
-      reason: CancellationReason.ClientCancelled,
-    });
-  });
-
   it('treats a missing turn as a successful cancel', async () => {
     const activeTurns = new ActiveTurnRegistry();
     const turnId = 'turn-missing';
@@ -333,21 +301,20 @@ describe('cancelSessionTurn', () => {
 });
 
 describe('cancelSessionTurnPeerHandler', () => {
-  it('aborts the local run only after the turn lock is released', async () => {
+  it('aborts a local run without waiting on the turn lock', async () => {
     const activeTurns = new ActiveTurnRegistry();
-    const turnId = 'turn-peer-locked';
+    const turnId = 'turn-peer';
     const abortController = trackRun(activeTurns, turnId);
-    const lock = holdTurnLock(activeTurns, turnId);
+    const gate = Promise.withResolvers<undefined>();
+    const held = activeTurns.withTurnLock({ sessionId: SESSION_ID, turnId }, () => gate.promise);
 
-    const reply = cancelSessionTurnPeerHandler(activeTurns)({
+    const reply = await cancelSessionTurnPeerHandler(activeTurns)({
       body: { session_id: SESSION_ID, turn_id: turnId, reason: CancellationReason.ClientCancelled },
     });
-    await flushAsync();
-    expect(abortController.signal.aborted).toBe(false);
 
-    lock.release();
-    await expect(reply).resolves.toEqual({ status: 200, body: {} });
+    expect(reply).toEqual({ status: 200, body: {} });
     expect(abortController.signal.aborted).toBe(true);
-    await lock.held;
+    gate.resolve(undefined);
+    await held;
   });
 });
