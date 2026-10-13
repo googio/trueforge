@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { TrueForgeError, type TrueForge } from '@truefoundry/trueforge-sdk';
 import { z } from 'zod';
+import { SandboxEnvironmentManifestRequestSchema } from '../../../../schemas/sandboxEnvironment';
 import { runTool } from '../result';
 
 /**
@@ -8,8 +9,6 @@ import { runTool } from '../result';
  * preflight GET so intent is explicit (create fails if present; update fails if absent). Best-effort:
  * two concurrent creates can still race (no conditional-create at the API layer).
  */
-const manifestSchema = z.looseObject({ name: z.string() });
-
 async function environmentExists(client: TrueForge, name: string): Promise<boolean> {
   try {
     await client.sandboxEnvironments.get(name);
@@ -30,7 +29,7 @@ export function registerSandboxEnvironmentTools(server: McpServer, client: TrueF
         'Create a reusable sandbox environment that agents run in — defining its resources, environment ' +
         'variables, networking, and build configuration — from a complete manifest. Fails if an environment ' +
         'with the same name already exists; the reserved `default` environment cannot be created.',
-      inputSchema: { manifest: manifestSchema },
+      inputSchema: { manifest: SandboxEnvironmentManifestRequestSchema },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     },
     async ({ manifest }) =>
@@ -41,7 +40,9 @@ export function registerSandboxEnvironmentTools(server: McpServer, client: TrueF
             body: { error: { message: `Sandbox environment already exists: ${manifest.name}` } },
           });
         }
-        return client.sandboxEnvironments.createOrUpdate({ manifest });
+        return client.sandboxEnvironments.createOrUpdate({ manifest } as unknown as Parameters<
+          typeof client.sandboxEnvironments.createOrUpdate
+        >[0]);
       }),
   );
 
@@ -86,7 +87,7 @@ export function registerSandboxEnvironmentTools(server: McpServer, client: TrueF
         'Change an existing sandbox environment — the resources, environment variables, networking, and build ' +
         'configuration agents run in — by replacing it with a complete manifest. The input name and manifest ' +
         'name must match, and this tool never creates a missing environment (use create_sandbox_environment for that).',
-      inputSchema: { name: z.string(), manifest: manifestSchema },
+      inputSchema: { name: z.string(), manifest: SandboxEnvironmentManifestRequestSchema },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     },
     async ({ name, manifest }) =>
@@ -103,7 +104,9 @@ export function registerSandboxEnvironmentTools(server: McpServer, client: TrueF
             body: { error: { message: `Sandbox environment not found: ${name}` } },
           });
         }
-        return client.sandboxEnvironments.createOrUpdate({ manifest });
+        return client.sandboxEnvironments.createOrUpdate({ manifest } as unknown as Parameters<
+          typeof client.sandboxEnvironments.createOrUpdate
+        >[0]);
       }),
   );
 }

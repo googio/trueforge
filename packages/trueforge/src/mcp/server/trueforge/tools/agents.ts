@@ -1,10 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { AgentSpecSchema } from '@truefoundry/trueforge-core/agent-session';
 import type { TrueForge } from '@truefoundry/trueforge-sdk';
 import { z } from 'zod';
 import { runTool } from '../result';
-
-/** Agent manifest is passed through to the API, which validates all references. */
-const manifestSchema = z.record(z.string(), z.unknown());
 
 export function registerAgentTools(server: McpServer, client: TrueForge): void {
   server.registerTool(
@@ -53,7 +51,7 @@ export function registerAgentTools(server: McpServer, client: TrueForge): void {
       inputSchema: {
         name: z.string(),
         description: z.string(),
-        manifest: manifestSchema,
+        manifest: AgentSpecSchema,
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     },
@@ -73,7 +71,7 @@ export function registerAgentTools(server: McpServer, client: TrueForge): void {
       inputSchema: {
         agent_id: z.string(),
         description: z.string().optional(),
-        manifest: manifestSchema,
+        manifest: AgentSpecSchema,
       },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     },

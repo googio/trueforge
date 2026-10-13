@@ -1,14 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { TrueForge } from '@truefoundry/trueforge-sdk';
 import { z } from 'zod';
+import { ScheduleManifestSchema } from '../../../../schemas/schedule';
 import { runTool } from '../result';
-
-const manifestSchema = z.object({
-  task: z.string(),
-  cron: z.string(),
-  timezone: z.string().optional(),
-  status: z.enum(['active', 'paused']).optional(),
-});
 
 export function registerScheduleTools(server: McpServer, client: TrueForge): void {
   server.registerTool(
@@ -20,7 +14,7 @@ export function registerScheduleTools(server: McpServer, client: TrueForge): voi
       inputSchema: {
         agent_name: z.string(),
         name: z.string(),
-        manifest: manifestSchema,
+        manifest: ScheduleManifestSchema,
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     },
@@ -103,7 +97,7 @@ export function registerScheduleTools(server: McpServer, client: TrueForge): voi
       inputSchema: {
         schedule_id: z.string(),
         name: z.string(),
-        manifest: manifestSchema,
+        manifest: ScheduleManifestSchema,
       },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     },
