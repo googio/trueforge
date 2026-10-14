@@ -122,9 +122,16 @@ export class PeerThreadFoldState {
 }
 
 function threadDoneErrorMessage(state: unknown): string | undefined {
-  if (typeof state !== 'object' || state == null) return undefined;
-  if (!('status' in state) || Reflect.get(state, 'status') !== 'error') return undefined;
-  const error = Reflect.get(state, 'error');
+  if (typeof state !== 'object' || state == null) {
+    return undefined;
+  }
+  if (!('status' in state) || state.status !== 'error') {
+    return undefined;
+  }
+  if (!('error' in state)) {
+    return 'Sub-agent failed';
+  }
+  const error = state.error;
   return typeof error === 'string' && error.length > 0 ? error : 'Sub-agent failed';
 }
 
