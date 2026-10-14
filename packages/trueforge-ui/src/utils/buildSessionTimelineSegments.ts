@@ -325,14 +325,9 @@ function appendEventSegments({
       const doneMs = doneEvent == null ? null : parseTimestamp(eventCreatedAt(doneEvent));
       // Cancelled unfinished children omit public thread.done; close the bar at turn end
       // so the chart still allocates a lane for child model/tool segments.
-      const turnEndMs =
-        parseTimestamp(terminalCompletedAt(turn.done?.state)) ?? parseTimestamp(turn.done?.createdAt);
+      const turnEndMs = parseTimestamp(terminalCompletedAt(turn.done?.state)) ?? parseTimestamp(turn.done?.createdAt);
       const closeMs =
-        doneMs != null && doneMs >= eventMs
-          ? doneMs
-          : turnEndMs != null && turnEndMs >= eventMs
-            ? turnEndMs
-            : eventMs;
+        doneMs != null && doneMs >= eventMs ? doneMs : turnEndMs != null && turnEndMs >= eventMs ? turnEndMs : eventMs;
       segments.push({
         id: eventId(event),
         type: 'sub_agent',
