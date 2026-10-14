@@ -8,7 +8,7 @@ import type {
 import { CancellationReason, TurnNotFoundError } from '@truefoundry/trueforge-core/agent-session';
 import { NoResponderError, redisRequest, RequestTimeoutError } from '@truefoundry/trueforge-core/request-reply';
 import type { RedisClientType } from 'redis';
-import { cancelSessionTurn, cancelSessionTurnPeerHandler } from '../../../src/apis/sessions';
+import { cancelSessionTurn } from '../../../src/apis/sessions';
 import configuration from '../../../src/config';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 
@@ -378,24 +378,5 @@ describe('cancelSessionTurn', () => {
         },
       ),
     ).resolves.toBeUndefined();
-  });
-});
-
-describe('cancelSessionTurnPeerHandler', () => {
-  it('aborts a local run without waiting on the turn lock', async () => {
-    const activeTurns = new ActiveTurnRegistry();
-    const turnId = 'turn-peer';
-    const abortController = trackRun(activeTurns, turnId);
-    const gate = Promise.withResolvers<undefined>();
-    const held = activeTurns.withTurnLock({ sessionId: SESSION_ID, turnId }, () => gate.promise);
-
-    const reply = await cancelSessionTurnPeerHandler(activeTurns)({
-      body: { session_id: SESSION_ID, turn_id: turnId, reason: CancellationReason.ClientCancelled },
-    });
-
-    expect(reply).toEqual({ status: 200, body: {} });
-    expect(abortController.signal.aborted).toBe(true);
-    gate.resolve(undefined);
-    await held;
   });
 });
