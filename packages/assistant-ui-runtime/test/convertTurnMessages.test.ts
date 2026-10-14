@@ -2209,7 +2209,6 @@ describe('convertTurnMessages', () => {
               createdAt,
               state: {
                 status: 'paused',
-                actionRequiredOnEvents: [{ id: 'approval-event' }],
               },
             },
             activeStream: {
@@ -2220,7 +2219,6 @@ describe('convertTurnMessages', () => {
                 metadata: { custom: { toolApprovalThreadId: ROOT_THREAD_ID } },
                 turnState: {
                   status: 'paused',
-                  actionRequiredOnEvents: [{ id: 'approval-event' }],
                 },
               },
               segmentStatus: 'paused',

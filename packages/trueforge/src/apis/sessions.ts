@@ -120,9 +120,10 @@ export function cancelSessionTurnPeerHandler(activeTurns: ActiveTurnRegistry): R
       turnId: parsed.data.turn_id,
       reason: parsed.data.reason,
     });
-    return Promise.resolve(
-      found ? { status: 200, body: {} } : { status: 412, body: { message: 'Turn is not running on this executor' } },
-    );
+    if (!found) {
+      return Promise.resolve({ status: 412, body: { message: 'Turn is not running on this executor' } });
+    }
+    return Promise.resolve({ status: 200, body: {} });
   };
 }
 
