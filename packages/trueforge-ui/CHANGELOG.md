@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.178.1
+
+### Patch Changes
+
+- a3fda4e: Allow tenant members to use sandbox environments created by other members while keeping update and delete actions restricted to the creator.
+
 ## 0.178.0
 
 ### Patch Changes
