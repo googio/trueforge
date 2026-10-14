@@ -7,8 +7,9 @@ import { EventType } from '../../src/agent-session/schemas/events';
 import { CancellationReason } from '../../src/agent-session/schemas/turn';
 import { Sessions } from '../../src/agent-session/Sessions';
 import { InMemorySessionStore } from '../../src/agent-session/store/InMemorySessionStore';
+import type { TurnHandle } from '../../src/agent-session/TurnHandle';
 import type { AgentCapability } from '../../src/core/capabilities/AgentCapability';
-import { newEventId } from '../../src/core/events/schema';
+import { newEventId, type TurnUserEvent } from '../../src/core/events/schema';
 import type { IToolSet, ListToolsResponse, ToolSource } from '../../src/core/mcp/IMCPServer';
 import { toolResultResponse } from '../../src/core/mcp/IMCPServer';
 import { ToolSet } from '../../src/core/mcp/ToolSet';
@@ -21,6 +22,17 @@ import {
   writeNoteToolCallStream,
 } from '../orchestration/helpers/helpers';
 import { makeAgentSpec, makeTestResolver, mintTestTurnId, TEST_ACTIVE_EXECUTOR_ID } from './testHelpers';
+
+/** Drives the same accept → persist → enqueue seam as POST /events. */
+async function sendWithInbox(turn: TurnHandle, store: InMemorySessionStore, events: TurnUserEvent[]): Promise<void> {
+  for await (const batch of turn.send(events)) {
+    await store.insertTurnInboundEvents({
+      session_id: turn.session_id,
+      turn_id: turn.id,
+      events: batch,
+    });
+  }
+}
 
 /** notes MCP source exposing an approval-gated write_note tool; `callTool` proves allow runs it. */
 function makeWriteNoteSource(callTool: ToolSource['callTool']): ToolSource {
@@ -182,7 +194,7 @@ describe('TurnHandle.send() full-approval resume (agent-session e2e)', () => {
       active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
       input: [{ type: EventType.USER_MESSAGE, content: 'hello' }],
       previous_turn_id: 'none',
-      signal: controller.signal,
+      abortController: controller,
       resolver: makeTestResolver({ extraCapabilities: [capability], llmCreate }),
     });
     expect(turn.state.status).toBe('running');
@@ -191,10 +203,10 @@ describe('TurnHandle.send() full-approval resume (agent-session e2e)', () => {
     // (turn.update paused), inject the approval decision via TurnHandle.send(), which wakes the
     // SAME execution, then keep draining to terminal done.
     const types: string[] = [];
-    const events: Array<{ type: string; [k: string]: unknown }> = [];
+    const events: { type: string; [k: string]: unknown }[] = [];
     let paused = false;
     let sent = false;
-    const iterator = turn.stream(controller);
+    const iterator = turn.stream();
     let step = await iterator.next();
     while (!step.done) {
       const event = step.value as { type: string; state?: { status: string }; [k: string]: unknown };
@@ -205,7 +217,7 @@ describe('TurnHandle.send() full-approval resume (agent-session e2e)', () => {
         // The gated tool has NOT run while we are parked awaiting the decision.
         expect(callTool).not.toHaveBeenCalled();
         expect(sent).toBe(false);
-        await turn.send([
+        await sendWithInbox(turn, store, [
           {
             type: EventType.USER_TOOL_APPROVAL,
             id: newEventId(),
@@ -251,14 +263,14 @@ describe('TurnHandle.send() full-approval resume (agent-session e2e)', () => {
       active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
       input: [{ type: EventType.USER_MESSAGE, content: 'hello' }],
       previous_turn_id: 'none',
-      signal: controller.signal,
+      abortController: controller,
       resolver: makeTestResolver({
         extraCapabilities: [capability],
         llmCreate: jest.fn().mockImplementation(() => writeNoteToolCallStream()),
       }),
     });
 
-    const iterator = turn.stream(controller);
+    const iterator = turn.stream();
     let step = await iterator.next();
     while (!step.done && !(step.value.type === EventType.TURN_UPDATE && step.value.state.status === 'paused')) {
       step = await iterator.next();
@@ -306,7 +318,7 @@ describe('TurnHandle.send() MCP-auth continuation', () => {
       active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
       input: [{ type: EventType.USER_MESSAGE, content: 'hello' }],
       previous_turn_id: 'none',
-      signal: new AbortController().signal,
+      abortController: new AbortController(),
       resolver: makeTestResolver({
         extraCapabilities: [capability],
         llmCreate: jest.fn(() => textReplyStream('authorized')),
@@ -328,14 +340,14 @@ describe('TurnHandle.send() MCP-auth continuation', () => {
       if (!sentContinue && step.value.type === EventType.TURN_UPDATE && step.value.state.status === 'paused') {
         authorize();
         const sends = await Promise.allSettled([
-          turn.send([
+          sendWithInbox(turn, store, [
             {
               type: EventType.USER_MCP_AUTH_CONTINUE,
               id: newEventId(),
               created_at: new Date().toISOString(),
             },
           ]),
-          turn.send([
+          sendWithInbox(turn, store, [
             {
               type: EventType.USER_MCP_AUTH_CONTINUE,
               id: newEventId(),
@@ -377,7 +389,7 @@ describe('TurnHandle.send() MCP-auth continuation', () => {
       active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
       input: [{ type: EventType.USER_MESSAGE, content: 'hello' }],
       previous_turn_id: 'none',
-      signal: new AbortController().signal,
+      abortController: new AbortController(),
       resolver: makeTestResolver({
         extraCapabilities: [capability],
         llmCreate: jest.fn(() => textReplyStream('authorized')),
@@ -395,7 +407,7 @@ describe('TurnHandle.send() MCP-auth continuation', () => {
         if (pauseCount === 2) {
           authorize();
         }
-        await turn.send([
+        await sendWithInbox(turn, store, [
           {
             type: EventType.USER_MCP_AUTH_CONTINUE,
             id: newEventId(),
@@ -433,7 +445,7 @@ describe('TurnHandle.send() MCP-auth continuation', () => {
       active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
       input: [{ type: EventType.USER_MESSAGE, content: 'hello' }],
       previous_turn_id: 'none',
-      signal: new AbortController().signal,
+      abortController: new AbortController(),
       resolver: makeTestResolver({ extraCapabilities: [capability], llmCreate }),
     });
 
@@ -446,7 +458,7 @@ describe('TurnHandle.send() MCP-auth continuation', () => {
       eventTypes.push(step.value.type);
       if (!sentContinue && step.value.type === EventType.TURN_UPDATE && step.value.state.status === 'paused') {
         listToolsCallsAtPause = listTools.mock.calls.length;
-        await turn.send([
+        await sendWithInbox(turn, store, [
           {
             type: EventType.USER_MCP_AUTH_CONTINUE,
             id: newEventId(),
@@ -483,12 +495,12 @@ describe('TurnHandle.send() MCP-auth continuation', () => {
       active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
       input: [{ type: EventType.USER_MESSAGE, content: 'hello' }],
       previous_turn_id: 'none',
-      signal: new AbortController().signal,
+      abortController: new AbortController(),
       resolver: makeTestResolver(),
     });
 
     await expect(
-      turn.send([
+      sendWithInbox(turn, store, [
         {
           type: EventType.USER_MCP_AUTH_CONTINUE,
           id: newEventId(),

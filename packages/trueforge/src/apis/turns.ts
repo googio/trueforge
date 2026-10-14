@@ -450,10 +450,10 @@ export async function beginTurnExecution(
   const turn = await session.createTurn({
     turn_id: turnId,
     active_executor_id: configuration.EXECUTOR_ID,
-    input,
-    previous_turn_id: previousTurnId,
-    signal: abortController.signal,
     resolver,
+    abortController: abortController,
+    previous_turn_id: previousTurnId,
+    input,
     update_session_title_if_not_exist: title,
   });
 
@@ -466,7 +466,7 @@ export async function beginTurnExecution(
 
   const trackedStream = deps.activeTurns.track({
     abortController,
-    stream: turn.stream(abortController),
+    stream: turn.stream(),
     turn,
   });
 
@@ -987,7 +987,14 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       }));
 
       try {
-        await turnHandle.send(events);
+        // Insert each accepted batch before resuming send(), which enqueues it and wakes execution.
+        for await (const batch of turnHandle.send(events)) {
+          await deps.sessionStore.insertTurnInboundEvents({
+            session_id: sessionId,
+            turn_id: turnId,
+            events: batch,
+          });
+        }
       } catch (error) {
         if (error instanceof AgentHarnessError && error.code === 'invalid_send_input') {
           return c.json({ error: { message: error.message } }, 400);
@@ -995,7 +1002,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         throw error;
       }
 
-      // TODO: durably persist inbound events.
       return c.json({ data: events }, 201);
     });
   };

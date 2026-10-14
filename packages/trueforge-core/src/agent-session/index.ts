@@ -99,6 +99,8 @@ export type {
   ListSessionsInput,
   ListTurnEventsInput,
   ListTurnsInput,
+  ListUnconsumedTurnInboundEventsInput,
+  MarkTurnInboundEventsConsumedInput,
   NewThreadInit,
   OverwriteThreadContextInput,
   PatchMCPServersInput,

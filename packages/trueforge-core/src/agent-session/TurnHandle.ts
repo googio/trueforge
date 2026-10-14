@@ -4,6 +4,7 @@
 import { AgentHarnessError } from '../core/errors';
 import type {
   MCPAuthRequiredEvent,
+  MCPServerInitInfo,
   ModelMessageDeltaEvent,
   ThreadDoneEvent,
   TurnUserEvent,
@@ -168,7 +169,7 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
   private turn: TurnRecord<TTurnCustom>;
   private readonly orchestrator: AgentThreadOrchestrator | undefined;
   private readonly resolver: ITurnResourceResolver<TTurnCustom> | undefined;
-  private readonly signal: AbortSignal | undefined;
+  private readonly abortController: AbortController;
   private streamStarted = false;
 
   constructor(options: {
@@ -176,13 +177,13 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
     turn: TurnRecord<TTurnCustom>;
     orchestrator?: AgentThreadOrchestrator | undefined;
     resolver?: ITurnResourceResolver<TTurnCustom> | undefined;
-    signal?: AbortSignal | undefined;
+    abortController?: AbortController | undefined;
   }) {
     this.store = options.store;
     this.turn = options.turn;
     this.orchestrator = options.orchestrator;
     this.resolver = options.resolver;
-    this.signal = options.signal;
+    this.abortController = options.abortController ?? new AbortController();
   }
 
   /** Store-only handle (e.g. from {@link SessionHandle.getTurn}) — stream() is not available. */
@@ -243,12 +244,10 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
     return this.turn;
   }
 
-  async send(events: TurnUserEvent[]): Promise<void> {
+  async *send(events: TurnUserEvent[]): AsyncGenerator<TurnUserEvent[], void> {
     const orchestrator = this.requireLiveOrchestrator('send');
-    for await (const batch of orchestrator.send(events)) {
-      // TODO: persist `batch` here before resuming the generator to enqueue.
-      void batch;
-    }
+    const accepted = orchestrator.send(events);
+    yield* accepted;
     orchestrator.wake();
   }
 
@@ -288,19 +287,26 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
    * order ≡ persist order (single sequential generator), so callers that need
    * numbering (e.g. SSE resume) stamp it at their own transport boundary.
    */
-  stream(abortController: AbortController = new AbortController()): AsyncGenerator<TurnStreamingEvent> {
+  stream(): AsyncGenerator<TurnStreamingEvent> {
     if (this.streamStarted) {
       throw new Error('TurnHandle.stream() is single-use and was already called');
     }
     this.streamStarted = true;
     const orchestrator = this.orchestrator;
     const resolver = this.resolver;
-    const signal = this.signal;
-    if (!orchestrator || !resolver || !signal) {
+    const signal = this.abortController.signal;
+    if (!orchestrator || !resolver) {
       throw new Error('TurnHandle.stream() is only available on turns returned from SessionHandle.createTurn()');
     }
 
-    return abortOnReturn(this.streamExecution(orchestrator, resolver, signal), abortController);
+    // A consumer can leave early (break, or iterator.return()) while execute is parked
+    // on wakeSignal.wait() at a pause. return() does not cancel that await, so the
+    // generator cannot finish, and the terminal write and resolver close never run.
+    // Aborting first is what wakes the wait: execute listens for abort and notifies
+    // the latch. The loop then sees the signal and returns. A turn that finishes on
+    // its own does not call return(), so it is not aborted. An abort that already
+    // happened (shutdown, timeout, barge-in) keeps its reason.
+    return abortOnReturn(this.streamExecution(orchestrator, resolver, signal), this.abortController);
   }
 
   private async *streamExecution(
@@ -562,6 +568,12 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
             events: userEvents,
           });
         }
+        if (event.applied_user_events.length > 0) {
+          await this.store.markTurnInboundEventsConsumed({
+            ...scope,
+            event_ids: event.applied_user_events.map(out => out.id),
+          });
+        }
         yield* event.applied_user_events;
         return;
       }
@@ -575,6 +587,10 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
         await this.store.appendToEvents({
           ...scope,
           events: [event.event],
+        });
+        await this.store.markTurnInboundEventsConsumed({
+          ...scope,
+          event_ids: [event.event.id],
         });
         yield event.event;
         return;
@@ -598,7 +614,10 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
           ...scope,
           events: [event.event],
         });
-        // TODO(durable-inbox): mark event.event consumed.
+        await this.store.markTurnInboundEventsConsumed({
+          ...scope,
+          event_ids: [event.event.id],
+        });
         yield event.event;
         return;
       }
@@ -668,7 +687,7 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
       case HarnessEventType.MCP_INITIALIZE: {
         await this.store.patchMCPServers({
           ...scope,
-          mcp_servers: event.mcp_servers.map(initInfo => ({
+          mcp_servers: event.mcp_servers.map((initInfo: MCPServerInitInfo) => ({
             id: initInfo.id,
             name: initInfo.name,
             session_id: initInfo.session_id,
