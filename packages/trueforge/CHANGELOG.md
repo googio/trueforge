@@ -1,5 +1,11 @@
 # @truefoundry/trueforge
 
+## 0.179.0-rc.3
+
+### Patch Changes
+
+- a2f2877: Allow tenant members to use sandbox environments created by other members while keeping update and delete actions restricted to the creator.
+
 ## 0.179.0-rc.2
 
 ### Patch Changes
