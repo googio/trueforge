@@ -209,14 +209,22 @@ export function turnNonTerminalFence(db: TurnFenceDb, keys: TurnKeys) {
     .forShare();
 }
 
-/** Classify a 0-row fenced write: missing turn vs frozen/non-running turn. */
-export async function classifyTurnFenceWriteFailure(db: Kysely<Database>, keys: TurnKeys): Promise<never> {
-  const row = await db
+/** Read owner and status. Missing turn returns undefined. No row lock. */
+async function loadTurnStateAndExecutor(
+  db: DbOrTrx,
+  keys: { session_id: string; turn_id: string },
+): Promise<{ state: TurnState; active_executor_id: string } | undefined> {
+  return db
     .selectFrom('turn')
     .select(['state', 'active_executor_id'])
     .where('session_id', '=', keys.session_id)
     .where('turn_id', '=', keys.turn_id)
     .executeTakeFirst();
+}
+
+/** Classify a 0-row fenced write: missing turn vs frozen/non-running turn. */
+export async function classifyTurnFenceWriteFailure(db: Kysely<Database>, keys: TurnKeys): Promise<never> {
+  const row = await loadTurnStateAndExecutor(db, keys);
 
   if (!row) {
     throw new TurnNotFoundError(keys.turn_id);
@@ -230,12 +238,7 @@ export async function classifyNonTerminalTurnThreadWriteFailure(
   keys: TurnKeys,
   thread_id: string,
 ): Promise<never> {
-  const row = await db
-    .selectFrom('turn')
-    .select(['state', 'active_executor_id'])
-    .where('session_id', '=', keys.session_id)
-    .where('turn_id', '=', keys.turn_id)
-    .executeTakeFirst();
+  const row = await loadTurnStateAndExecutor(db, keys);
 
   if (!row) {
     throw new TurnNotFoundError(keys.turn_id);

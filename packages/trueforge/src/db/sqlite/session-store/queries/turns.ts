@@ -69,7 +69,7 @@ export interface TurnKeys {
   active_executor_id: string;
 }
 
-interface LoadedTurnFence {
+interface TurnStateAndExecutor {
   state: TurnState;
   active_executor_id: string;
 }
@@ -175,10 +175,10 @@ function terminalTurnState(state: TurnState, turn_id: string): TerminalTurnState
   }
 }
 
-async function loadTurnFence(
+async function loadTurnStateAndExecutor(
   db: DbOrTrx,
   keys: { session_id: string; turn_id: string },
-): Promise<LoadedTurnFence | undefined> {
+): Promise<TurnStateAndExecutor | undefined> {
   const row = await db
     .selectFrom('turn')
     .select([jsonText<TurnState>(sql.ref('state')).as('state'), 'active_executor_id'])
@@ -190,7 +190,7 @@ async function loadTurnFence(
 
 /** Classify a 0-row fenced write: missing turn, lost owner, or frozen turn. */
 export async function classifyTurnFenceWriteFailure(db: DbOrTrx, keys: TurnKeys): Promise<never> {
-  const row = await loadTurnFence(db, keys);
+  const row = await loadTurnStateAndExecutor(db, keys);
   if (!row) {
     throw new TurnNotFoundError(keys.turn_id);
   }
@@ -203,7 +203,7 @@ export async function classifyNonTerminalTurnThreadWriteFailure(
   keys: TurnKeys,
   thread_id: string,
 ): Promise<never> {
-  const row = await loadTurnFence(db, keys);
+  const row = await loadTurnStateAndExecutor(db, keys);
   if (!row) {
     throw new TurnNotFoundError(keys.turn_id);
   }
@@ -226,8 +226,11 @@ function throwUnlessNonTerminal(turnId: string, state: TurnState): void {
   }
 }
 
-async function requireTurnFence(db: DbOrTrx, keys: { session_id: string; turn_id: string }): Promise<LoadedTurnFence> {
-  const row = await loadTurnFence(db, keys);
+async function loadSharedTurn(
+  db: DbOrTrx,
+  keys: { session_id: string; turn_id: string },
+): Promise<TurnStateAndExecutor> {
+  const row = await loadTurnStateAndExecutor(db, keys);
   if (!row) {
     throw new TurnNotFoundError(keys.turn_id);
   }
@@ -235,19 +238,19 @@ async function requireTurnFence(db: DbOrTrx, keys: { session_id: string; turn_id
 }
 
 export async function assertOwnedRunningTurn(db: DbOrTrx, keys: TurnKeys): Promise<void> {
-  const row = await requireTurnFence(db, keys);
+  const row = await loadSharedTurn(db, keys);
   throwIfExecutorMismatch(keys, row.active_executor_id);
   throwUnlessRunning(keys.turn_id, row.state);
 }
 
 export async function assertOwnedNonTerminalTurn(db: DbOrTrx, keys: TurnKeys): Promise<void> {
-  const row = await requireTurnFence(db, keys);
+  const row = await loadSharedTurn(db, keys);
   throwIfExecutorMismatch(keys, row.active_executor_id);
   throwUnlessNonTerminal(keys.turn_id, row.state);
 }
 
 export async function assertTurnNonTerminal(db: DbOrTrx, keys: { session_id: string; turn_id: string }): Promise<void> {
-  const row = await requireTurnFence(db, keys);
+  const row = await loadSharedTurn(db, keys);
   throwUnlessNonTerminal(keys.turn_id, row.state);
 }
 
@@ -886,7 +889,7 @@ export async function updateTurnNonTerminalState(
       .executeTakeFirst();
 
     if (result === undefined) {
-      const existing = await loadTurnFence(trx, input);
+      const existing = await loadTurnStateAndExecutor(trx, input);
 
       if (!existing) {
         throw new TurnNotFoundError(input.turn_id);
@@ -933,7 +936,7 @@ export async function updateTurnTerminalState(
       .executeTakeFirst();
 
     if (result === undefined) {
-      const existing = await loadTurnFence(trx, input);
+      const existing = await loadTurnStateAndExecutor(trx, input);
 
       if (!existing) {
         throw new TurnNotFoundError(input.turn_id);

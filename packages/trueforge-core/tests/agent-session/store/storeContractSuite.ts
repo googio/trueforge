@@ -619,6 +619,7 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
         }),
       );
       await store.appendToEvents({
+        active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
         session_id: sessionId,
         turn_id: 'turn-1',
         events: [makeTurnCreatedEvent('turn-1'), makeModelMessageEvent()],
@@ -2872,7 +2873,12 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
         thread_ids: [MAIN_THREAD_ID],
         pending_mcp_auth: true,
       });
-      await store.appendToEvents({ session_id: sessionId, turn_id: 'turn-1', events: [required] });
+      await store.appendToEvents({
+        active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
+        session_id: sessionId,
+        turn_id: 'turn-1',
+        events: [required],
+      });
       let turn = mustGet(await store.getTurn({ session_id: sessionId, turn_id: 'turn-1' }));
       expect(turn.snapshot.threads[MAIN_THREAD_ID]?.pending_mcp_auth).toBe(true);
 
@@ -2887,7 +2893,12 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
         thread_ids: [MAIN_THREAD_ID],
         pending_mcp_auth: false,
       });
-      await store.appendToEvents({ session_id: sessionId, turn_id: 'turn-1', events: [continued] });
+      await store.appendToEvents({
+        active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
+        session_id: sessionId,
+        turn_id: 'turn-1',
+        events: [continued],
+      });
       turn = mustGet(await store.getTurn({ session_id: sessionId, turn_id: 'turn-1' }));
       expect(turn.snapshot.threads[MAIN_THREAD_ID]?.pending_mcp_auth).toBe(false);
 
@@ -3540,6 +3551,7 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
       await seedSession(store);
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
       await store.appendToEvents({
+        active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
         session_id: sessionId,
         turn_id: 'turn-1',
         events: [makeTurnCreatedEvent('turn-1'), makeModelMessageEvent()],
@@ -3863,8 +3875,7 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
       expect(turn.active_executor_id).toBe(TEST_ACTIVE_EXECUTOR_ID);
     });
 
-    it('rejects a progress write from a stale executor', async () => {
-      const store = createStore();
+    async function stealPausedTurn(store: ISessionStore) {
       await seedSession(store);
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
       await pauseTurn(store, 'turn-1');
@@ -3875,25 +3886,166 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
         new_executor_id: 'executor-b',
       });
       expect(won).toBe(true);
+    }
 
-      const event = makeTurnCreatedEvent('turn-1');
-      await expect(
-        store.appendToEvents({
-          session_id: sessionId,
-          turn_id: 'turn-1',
-          active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
-          events: [event],
-        }),
-      ).rejects.toBeInstanceOf(TurnOwnershipLostError);
+    const staleExecutorWrites: [string, (store: ISessionStore) => Promise<unknown>][] = [
+      [
+        'updateTurnNonTerminalState',
+        store => {
+          const runningState = { status: 'running' as const };
+          return store.updateTurnNonTerminalState({
+            session_id: sessionId,
+            turn_id: 'turn-1',
+            active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
+            state: runningState,
+            turn_update_event: makeTurnUpdateEvent(runningState),
+          });
+        },
+      ],
+      [
+        'updateTurnTerminalState',
+        store => {
+          const doneState = makeDoneTurnState();
+          return store.updateTurnTerminalState({
+            session_id: sessionId,
+            turn_id: 'turn-1',
+            active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
+            state: doneState,
+            turn_done_event: makeTurnDoneEvent(doneState),
+          });
+        },
+      ],
+      [
+        'appendToEvents',
+        store =>
+          store.appendToEvents({
+            session_id: sessionId,
+            turn_id: 'turn-1',
+            active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
+            events: [makeTurnCreatedEvent('turn-1')],
+          }),
+      ],
+      [
+        'addThreads',
+        store =>
+          store.addThreads({
+            session_id: sessionId,
+            turn_id: 'turn-1',
+            active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
+            threads: [
+              {
+                thread_id: 'child',
+                context: [],
+                current_context_usage: getEmptyCurrentContextUsage(),
+                parent: { thread_id: MAIN_THREAD_ID, tool_call_id: 'tc1' },
+                agent_info: { type: 'dynamic', name: 'child', input: 'task' },
+                completion: null,
+                pending_mcp_auth: false,
+                capability_state: null,
+              },
+            ],
+          }),
+      ],
+      [
+        'removeThreads',
+        store =>
+          store.removeThreads({
+            session_id: sessionId,
+            turn_id: 'turn-1',
+            active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
+            thread_ids: [MAIN_THREAD_ID],
+          }),
+      ],
+      [
+        'appendToThreadContext',
+        store =>
+          store.appendToThreadContext({
+            session_id: sessionId,
+            turn_id: 'turn-1',
+            active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
+            thread_id: MAIN_THREAD_ID,
+            context: [userMessage('late')],
+            current_context_usage: null,
+            completion: null,
+          }),
+      ],
+      [
+        'overwriteThreadContext',
+        store =>
+          store.overwriteThreadContext({
+            session_id: sessionId,
+            turn_id: 'turn-1',
+            active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
+            event: {
+              type: EventType.AGENT_CONTEXT_OVERWRITE,
+              id: newEventId(),
+              created_at: new Date().toISOString(),
+              thread_id: MAIN_THREAD_ID,
+              reason: 'compaction',
+              context: [userMessage('late')],
+              current_context_usage: getEmptyCurrentContextUsage(),
+              usage: getEmptyUsage(),
+            },
+          }),
+      ],
+      [
+        'patchMCPServers',
+        store =>
+          store.patchMCPServers({
+            session_id: sessionId,
+            turn_id: 'turn-1',
+            active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
+            mcp_servers: [{ id: 'svc', name: 'svc', session_id: 'mcp-1', transport_type: 'streamable-http' }],
+          }),
+      ],
+      [
+        'patchSandboxInfo',
+        store =>
+          store.patchSandboxInfo({
+            session_id: sessionId,
+            turn_id: 'turn-1',
+            active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
+            sandbox_info: { sandbox_id: 'sbx-1' },
+          }),
+      ],
+      [
+        'patchThreadCapabilityState',
+        store =>
+          store.patchThreadCapabilityState({
+            session_id: sessionId,
+            turn_id: 'turn-1',
+            active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
+            thread_id: MAIN_THREAD_ID,
+            key: 'tfy.plan',
+            state: { step: 1 },
+          }),
+      ],
+    ];
 
-      const listed = await store.listTurnEvents({
+    it.each(staleExecutorWrites)('rejects %s from a stale executor', async (_name, write) => {
+      const store = createStore();
+      await stealPausedTurn(store);
+      const before = mustGet(await store.getTurn({ session_id: sessionId, turn_id: 'turn-1' }));
+      const beforeEvents = await store.listTurnEvents({
         session_id: sessionId,
         turn_id: 'turn-1',
         limit: 20,
         page_token: undefined,
         order: 'asc',
       });
-      expect(listed.data.some(row => row.id === event.id)).toBe(false);
+
+      await expect(write(store)).rejects.toBeInstanceOf(TurnOwnershipLostError);
+
+      const after = mustGet(await store.getTurn({ session_id: sessionId, turn_id: 'turn-1' }));
+      const afterEvents = await store.listTurnEvents({
+        session_id: sessionId,
+        turn_id: 'turn-1',
+        limit: 20,
+        page_token: undefined,
+        order: 'asc',
+      });
+      expect(after).toEqual(before);
+      expect(afterEvents).toEqual(beforeEvents);
     });
   });
 

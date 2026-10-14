@@ -294,8 +294,6 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
       throw new Error('TurnHandle.stream() is single-use and was already called');
     }
     this.streamStarted = true;
-    this.streamAbort = abortController;
-
     const orchestrator = this.orchestrator;
     const resolver = this.resolver;
     const signal = this.signal;
@@ -303,8 +301,7 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
       throw new Error('TurnHandle.stream() is only available on turns returned from SessionHandle.createTurn()');
     }
 
-    const executionSignal = AbortSignal.any([signal, abortController.signal]);
-    return abortOnReturn(this.streamExecution(orchestrator, resolver, executionSignal), abortController);
+    return abortOnReturn(this.streamExecution(orchestrator, resolver, signal), abortController);
   }
 
   private async *streamExecution(
@@ -374,7 +371,9 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
       thread_id: null,
     };
     await this.store.appendToEvents({
-      ...this.turnWriteKeys(),
+      session_id: this.turn.session_id,
+      turn_id: this.turn.turn_id,
+      active_executor_id: this.turn.active_executor_id,
       events: [turnCreated],
     });
     return turnCreated;
@@ -426,7 +425,9 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
     });
     const turnDone = turnDoneEvent(terminalState, createdAtIso);
     await this.store.updateTurnTerminalState({
-      ...this.turnWriteKeys(),
+      session_id: this.turn.session_id,
+      turn_id: this.turn.turn_id,
+      active_executor_id: this.turn.active_executor_id,
       state: terminalState,
       turn_done_event: turnDone,
     });
@@ -452,15 +453,14 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
     return turnDoneEvent(state, updatedAt.toISOString());
   }
 
-  private turnWriteKeys(): { session_id: string; turn_id: string; active_executor_id: string } {
-    return {
-      session_id: this.turn.session_id,
-      turn_id: this.turn.turn_id,
-      active_executor_id: this.turn.active_executor_id,
-    };
-  }
-
-  /** Stop in-flight work on this replica. The turn row stays with its new owner. */
+  /**
+   * Another replica claimed this paused turn because our heartbeat key was missing.
+   * The client send that caused the claim was not delivered here. We notice on the next fenced write.
+   *
+   * Abort so the orchestrator stops. Closing the resolver does not stop it.
+   * The loop may be waiting for the next event, or running a tool before `running` is saved.
+   * Abort sets the signal and wakes that wait. The row stays with the new owner.
+   */
   private abortIfOwnershipLost(error: unknown): void {
     if (!(error instanceof TurnOwnershipLostError)) {
       return;
@@ -508,7 +508,9 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
       thread_id: null,
     };
     await this.store.updateTurnNonTerminalState({
-      ...this.turnWriteKeys(),
+      session_id: this.turn.session_id,
+      turn_id: this.turn.turn_id,
+      active_executor_id: this.turn.active_executor_id,
       state,
       turn_update_event: turnUpdate,
     });
@@ -519,7 +521,11 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
   private async *persistExecutionEvent(
     event: Exclude<AgentThreadExecutionEvent, InternalTurnStateEvent>,
   ): AsyncGenerator<TurnStreamingEvent, void, unknown> {
-    const scope = this.turnWriteKeys();
+    const scope = {
+      session_id: this.turn.session_id,
+      turn_id: this.turn.turn_id,
+      active_executor_id: this.turn.active_executor_id,
+    };
 
     switch (event.type) {
       case HarnessEventType.MODEL_MESSAGE:
