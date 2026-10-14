@@ -59,13 +59,16 @@ export interface ThreadBucket {
   approvalDecisions: Map<string, ApprovalDecisionRef>;
   pendingResponses: Map<string, PendingResponseRef>;
   done: boolean;
-  /** Set when `thread.done.state.status === 'error'`. */
+  /** Failure text from a sub-agent thread that ended in error. */
   error?: string;
   title?: string;
   agentInfo?: AgentInfo;
 }
 
-/** When the parent turn is already terminal, unfinished children inherit this status. */
+/**
+ * Sticky note on the fold while projecting a finished parent turn.
+ * Unfinished children copy this so they show cancelled/error instead of running.
+ */
 export type ParentTerminalStatus = 'cancelled' | 'error';
 
 export interface ThreadParentLink {
@@ -100,7 +103,7 @@ function assertRootThreadEvent(threadId: string, eventType: string): void {
 export class PeerThreadFoldState {
   readonly threads = new Map<string, ThreadBucket>();
   readonly threadParents = new Map<string, ThreadParentLink>();
-  /** History projection sets this while building content for a terminal parent turn. */
+  /** Set only while building content for a cancelled/errored parent turn; cleared after. */
   parentTerminalStatus: ParentTerminalStatus | undefined;
 
   getOrCreateBucket(threadId: string): ThreadBucket {
@@ -121,6 +124,7 @@ export class PeerThreadFoldState {
   }
 }
 
+/** Pull the human-readable error off a thread.done error state, or a fallback label. */
 function threadDoneErrorMessage(state: unknown): string | undefined {
   if (typeof state !== 'object' || state == null) {
     return undefined;
@@ -135,7 +139,10 @@ function threadDoneErrorMessage(state: unknown): string | undefined {
   return typeof error === 'string' && error.length > 0 ? error : 'Sub-agent failed';
 }
 
-/** Cancel mid-stream can persist thread.done error "LLM stream aborted"; treat as cancel, not failure. */
+/**
+ * Cancel often leaves a noisy "LLM stream aborted" error on the child thread.
+ * That is cancel cleanup, not a real sub-agent failure.
+ */
 export function isAbortShapedThreadError(message: string): boolean {
   const normalized = message.trim().toLowerCase();
   return (
@@ -205,6 +212,7 @@ function ingestEventIntoBucket(bucket: ThreadBucket, message: TurnStreamingEvent
     if (message.title) {
       bucket.title = message.title;
     }
+    // Remember the failure message so the UI can show error instead of complete.
     const errorMessage = threadDoneErrorMessage(message.state);
     if (errorMessage != null) {
       bucket.error = errorMessage;
@@ -346,15 +354,18 @@ function bucketAssistantStatus(bucket: ThreadBucket, state: PeerThreadFoldState)
   if (bucketHasUnresolvedPendingResponses(bucket)) {
     return toolResponseStatus();
   }
+  // Parent was cancelled: unfinished (or abort-noise) children count as cancelled too.
   if (state.parentTerminalStatus === 'cancelled') {
     if (!bucket.done || (bucket.error != null && isAbortShapedThreadError(bucket.error))) {
       return { type: 'incomplete', reason: 'cancelled' };
     }
   }
+  // Real sub-agent failure (not abort noise from a cancel).
   if (bucket.error != null) {
     return { type: 'incomplete', reason: 'error', error: bucket.error };
   }
   if (!bucket.done) {
+    // Parent already failed; child never finished — show parent failure, not "running".
     if (state.parentTerminalStatus === 'error') {
       return { type: 'incomplete', reason: 'error', error: 'Parent turn failed' };
     }

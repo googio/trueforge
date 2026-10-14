@@ -351,6 +351,7 @@ function cloneThreadBucket(bucket: ThreadBucket): ThreadBucket {
     approvalDecisions: new Map(bucket.approvalDecisions),
     pendingResponses: new Map(bucket.pendingResponses),
     done: bucket.done,
+    // Keep sub-agent failure text so a cloned bucket still shows as failed.
     ...(bucket.error != null ? { error: bucket.error } : {}),
     ...(bucket.title != null ? { title: bucket.title } : {}),
     ...(bucket.agentInfo != null ? { agentInfo: bucket.agentInfo } : {}),
@@ -383,6 +384,7 @@ export function prependFoldState(older: PeerThreadFoldState, newer: PeerThreadFo
       approvalDecisions: new Map([...olderBucket.approvalDecisions, ...newerBucket.approvalDecisions]),
       pendingResponses: new Map([...olderBucket.pendingResponses, ...newerBucket.pendingResponses]),
       done: newerBucket.done || olderBucket.done,
+      // Prefer the newer failure text; if only the older turn failed, keep that.
       ...(newerBucket.error != null || olderBucket.error != null
         ? { error: newerBucket.error ?? olderBucket.error }
         : {}),
@@ -976,6 +978,9 @@ function buildTurnUpdateFromFold(
   turn: Pick<Turn, 'state'>,
   rootModelMessageIds: readonly string[],
 ): TurnStreamUpdate {
+  // While we build this turn's messages, tell nested sub-agents that the parent
+  // already ended (cancelled/error) so they do not stay stuck as "running".
+  // Restore afterward so the flag does not leak into the next turn.
   const previousParentTerminal = foldState.parentTerminalStatus;
   if (turn.state.status === 'cancelled') {
     foldState.parentTerminalStatus = 'cancelled';
@@ -1759,6 +1764,7 @@ export async function* streamTurnEvents(
           groupRootBaseline != null
             ? rootModelMessageIdsSinceBaseline(foldState, groupRootBaseline)
             : (foldState.threads.get(ROOT_THREAD_ID)?.modelMessageIds ?? []);
+        // Same as history: mark parent cancelled so open sub-agents render cancelled too.
         const previousParentTerminal = foldState.parentTerminalStatus;
         foldState.parentTerminalStatus = 'cancelled';
         try {
