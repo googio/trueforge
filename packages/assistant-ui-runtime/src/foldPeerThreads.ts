@@ -348,13 +348,8 @@ function bucketHasUnresolvedPendingResponses(bucket: ThreadBucket): boolean {
 }
 
 function bucketAssistantStatus(bucket: ThreadBucket, state: PeerThreadFoldState): MessageStatus {
-  if (bucket.pendingApprovals.size > 0) {
-    return toolApprovalStatus();
-  }
-  if (bucketHasUnresolvedPendingResponses(bucket)) {
-    return toolResponseStatus();
-  }
-  // Parent was cancelled: unfinished (or abort-noise) children count as cancelled too.
+  // Parent already ended: do not keep showing "waiting for approval/answer" on children.
+  // Cancel/error first so HITL leftovers from the dead turn cannot hide the terminal state.
   if (state.parentTerminalStatus === 'cancelled') {
     if (!bucket.done || (bucket.error != null && isAbortShapedThreadError(bucket.error))) {
       return { type: 'incomplete', reason: 'cancelled' };
@@ -364,14 +359,17 @@ function bucketAssistantStatus(bucket: ThreadBucket, state: PeerThreadFoldState)
   if (bucket.error != null) {
     return { type: 'incomplete', reason: 'error', error: bucket.error };
   }
-  if (!bucket.done) {
-    // Parent already failed; child never finished — show parent failure, not "running".
-    if (state.parentTerminalStatus === 'error') {
-      return { type: 'incomplete', reason: 'error', error: 'Parent turn failed' };
-    }
-    if (bucket.modelMessageIds.length > 0) {
-      return { type: 'running' };
-    }
+  if (!bucket.done && state.parentTerminalStatus === 'error') {
+    return { type: 'incomplete', reason: 'error', error: 'Parent turn failed' };
+  }
+  if (bucket.pendingApprovals.size > 0) {
+    return toolApprovalStatus();
+  }
+  if (bucketHasUnresolvedPendingResponses(bucket)) {
+    return toolResponseStatus();
+  }
+  if (!bucket.done && bucket.modelMessageIds.length > 0) {
+    return { type: 'running' };
   }
   return { type: 'complete', reason: 'stop' };
 }

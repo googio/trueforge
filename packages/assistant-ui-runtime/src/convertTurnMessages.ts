@@ -1042,6 +1042,38 @@ function resolveProjectedRequiredActionState(
   return { status, custom };
 }
 
+/** Use the turn's cancel/error state, or fall back to the stream update's. */
+function turnLikeForActiveStreamProjection(
+  turnLike: Pick<Turn, 'state'> | undefined,
+  update: TurnStreamUpdate,
+): Pick<Turn, 'state'> | undefined {
+  if (turnLike != null && (turnLike.state.status === 'cancelled' || turnLike.state.status === 'error')) {
+    return turnLike;
+  }
+  const status = update.status;
+  if (status?.type === 'incomplete' && status.reason === 'cancelled') {
+    const reason = update.metadata?.custom?.[CANCELLATION_REASON_CUSTOM_KEY];
+    return {
+      state: {
+        status: 'cancelled',
+        reason: typeof reason === 'string' ? reason : 'client-cancelled',
+        completedAt: new Date().toISOString(),
+      },
+    };
+  }
+  if (status?.type === 'incomplete' && status.reason === 'error') {
+    const message = status.error;
+    return {
+      state: {
+        status: 'error',
+        message: typeof message === 'string' && message.length > 0 ? message : 'Turn failed',
+        completedAt: new Date().toISOString(),
+      },
+    };
+  }
+  return turnLike;
+}
+
 function projectActiveStreamUpdate(snapshot: SessionSnapshot): TurnStreamUpdate {
   const activeStream = snapshot.activeStream;
   if (activeStream == null) {
@@ -1060,15 +1092,19 @@ function projectActiveStreamUpdate(snapshot: SessionSnapshot): TurnStreamUpdate 
   const baseline = snapshot.groupRootBaseline ?? computeGroupRootBaseline(snapshot.turns);
   const rootModelMessageIds = rootModelMessageIdsSinceBaseline(snapshot.fold, baseline);
 
-  const foldContent = buildRootAssistantContentForIds(snapshot.fold, rootModelMessageIds);
-  const content = foldContent.length > 0 ? foldContent : activeStream.update.content;
-
   const turnRecord = snapshot.turns.find(turn => turn.id === activeStream.turnId);
-  const turnLike = turnRecord ?? snapshot.runningTurn;
+  const projectionTurn = turnLikeForActiveStreamProjection(
+    turnRecord ?? snapshot.runningTurn,
+    activeStream.update,
+  );
 
+  // Build through buildTurnUpdateFromFold so cancelled/errored parents mark children too.
   const rebuilt =
-    turnLike != null ? buildTurnUpdateFromFold(snapshot.fold, turnLike, rootModelMessageIds) : { content };
+    projectionTurn != null
+      ? buildTurnUpdateFromFold(snapshot.fold, projectionTurn, rootModelMessageIds)
+      : { content: buildRootAssistantContentForIds(snapshot.fold, rootModelMessageIds) };
 
+  const content = rebuilt.content.length > 0 ? rebuilt.content : activeStream.update.content;
   const metadata = rebuilt.metadata ?? activeStream.update.metadata;
   const status = rebuilt.status ?? activeStream.update.status;
   return {

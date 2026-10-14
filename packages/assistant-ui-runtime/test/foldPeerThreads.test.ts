@@ -521,6 +521,70 @@ describe('foldPeerThreads', () => {
     expect(spawn.messages?.[0]?.status).toEqual({ type: 'incomplete', reason: 'cancelled' });
   });
 
+  it('marks nested sub-agent cancelled over pending approval when parent turn is cancelled', () => {
+    const state = new PeerThreadFoldState();
+
+    ingestTurnEvent(
+      state,
+      modelMessage({
+        id: 'root-msg',
+        threadId: ROOT_THREAD_ID,
+        toolCalls: [
+          {
+            id: 'spawn-1',
+            type: 'function',
+            function: { name: 'create_sub_agent', arguments: '{}' },
+            toolInfo: { type: 'trueforge-system', name: 'create_sub_agent' },
+          },
+        ],
+      }),
+    );
+    ingestTurnEvent(
+      state,
+      threadCreated({
+        id: 't-created',
+        threadId: 'child-1',
+        title: 'Research agent',
+        agentInfo: { type: 'dynamic', name: 'researcher', input: 'do research' },
+        parent: { threadId: ROOT_THREAD_ID, toolCallId: 'spawn-1' },
+      }),
+    );
+    ingestTurnEvent(
+      state,
+      modelMessage({
+        id: 'child-msg',
+        threadId: 'child-1',
+        content: 'need approval',
+        toolCalls: [
+          {
+            id: 'tool-1',
+            type: 'function',
+            function: { name: 'run_shell', arguments: '{}' },
+            toolInfo: {
+              type: 'mcp',
+              name: 'run_shell',
+              serverId: 'srv-1',
+              serverName: 'shell',
+            },
+          },
+        ],
+      }),
+    );
+    ingestTurnEvent(state, {
+      type: 'tool.approval_required',
+      id: 'appr-req-1',
+      createdAt,
+      threadId: 'child-1',
+      toolCalls: [{ id: 'tool-1', sourceEventId: 'child-msg' }],
+    });
+
+    state.parentTerminalStatus = 'cancelled';
+    const spawn = buildRootAssistantContent(state).find(part => part.type === 'tool-call');
+    expect(spawn?.type).toBe('tool-call');
+    if (spawn?.type !== 'tool-call') return;
+    expect(spawn.messages?.[0]?.status).toEqual({ type: 'incomplete', reason: 'cancelled' });
+  });
+
   it('marks abort-shaped thread.done error as cancelled when parent turn is cancelled', () => {
     const state = new PeerThreadFoldState();
 

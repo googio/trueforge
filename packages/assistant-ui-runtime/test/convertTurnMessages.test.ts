@@ -2275,6 +2275,73 @@ describe('convertTurnMessages', () => {
       expect(findCurrentPausedAssistantMessage(messages)).toBe(assistant);
     });
 
+    it('remaps nested sub-agent to cancelled when streamComplete update is cancelled', () => {
+      const fold = new PeerThreadFoldState();
+      ingestTurnEvent(
+        fold,
+        modelMessage({
+          id: 'root-msg',
+          threadId: ROOT_THREAD_ID,
+          toolCalls: [
+            {
+              id: 'spawn-1',
+              type: 'function',
+              function: { name: 'create_sub_agent', arguments: '{}' },
+              toolInfo: { type: 'trueforge-system', name: 'create_sub_agent' },
+            },
+          ],
+        }),
+      );
+      ingestTurnEvent(
+        fold,
+        threadCreated({
+          id: 't-created',
+          threadId: 'child-1',
+          title: 'finder',
+          agentInfo: { type: 'dynamic', name: 'finder', input: 'find' },
+          parent: { threadId: ROOT_THREAD_ID, toolCallId: 'spawn-1' },
+        }),
+      );
+      ingestTurnEvent(
+        fold,
+        modelMessage({
+          id: 'child-msg',
+          threadId: 'child-1',
+          content: 'still working',
+        }),
+      );
+
+      // Stale stream content still shows the child as running; rebuild must remap it.
+      const staleContent = buildRootAssistantContent(fold);
+      const spawnBefore = staleContent.find(part => part.type === 'tool-call');
+      expect(spawnBefore?.type).toBe('tool-call');
+      if (spawnBefore?.type === 'tool-call') {
+        expect(spawnBefore.messages?.[0]?.status).toEqual({ type: 'running' });
+      }
+
+      const messages = projectSessionMessages(
+        snapshotWithCompletedStream(
+          {
+            content: staleContent,
+            status: { type: 'incomplete', reason: 'cancelled' },
+            metadata: { custom: { cancellationReason: 'client-cancelled' } },
+          },
+          fold,
+        ),
+      );
+
+      const assistant = messages.at(-1);
+      expect(assistant?.role).toBe('assistant');
+      if (assistant?.role !== 'assistant') {
+        return;
+      }
+      expect(assistant.status).toEqual({ type: 'incomplete', reason: 'cancelled' });
+      const spawn = assistant.content.find(part => part.type === 'tool-call');
+      expect(spawn?.type).toBe('tool-call');
+      if (spawn?.type !== 'tool-call') return;
+      expect(spawn.messages?.[0]?.status).toEqual({ type: 'incomplete', reason: 'cancelled' });
+    });
+
     it('forces complete when streamComplete and update has no explicit status', () => {
       const foldState = new PeerThreadFoldState();
       const messages = projectSessionMessages(
