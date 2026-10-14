@@ -1,5 +1,14 @@
 # @truefoundry/trueforge
 
+## 0.179.0-rc.2
+
+### Patch Changes
+
+- bbe23c8: Preserve supervisord ENTRYPOINT on Daytona custom-environment buildInfo snapshots so the sandbox NATS bridge starts (Daytona otherwise defaults to sleep infinity).
+- Updated dependencies [bbe23c8]
+- Updated dependencies [bbe23c8]
+  - @truefoundry/trueforge-core@0.179.0-rc.2
+
 ## 0.179.0-rc.1
 
 ### Patch Changes
