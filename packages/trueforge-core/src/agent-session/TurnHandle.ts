@@ -170,7 +170,6 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
   private readonly resolver: ITurnResourceResolver<TTurnCustom> | undefined;
   private readonly signal: AbortSignal | undefined;
   private streamStarted = false;
-  private streamAbort: AbortController | undefined;
 
   constructor(options: {
     store: ISessionStore<object, TTurnCustom>;
@@ -318,8 +317,10 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
     } catch (error) {
       caughtError = error instanceof Error ? error : new Error(String(error));
       if (caughtError instanceof TurnOwnershipLostError) {
+        // The row belongs to another replica. Skip the terminal write.
+        // A paused loop that is not writing stays parked until keepalive offload,
+        // or until a later event on this replica aborts the in-memory handle.
         ownershipLost = caughtError;
-        this.abortIfOwnershipLost(caughtError);
       }
     } finally {
       // Terminal write stays in finally so a consumer break still closes the turn.
@@ -337,7 +338,6 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
         } catch (error) {
           if (error instanceof TurnOwnershipLostError) {
             ownershipLost = error;
-            this.abortIfOwnershipLost(error);
           } else {
             const storeDone = this.eventFromStoreConflict(error, orchestrator);
             if (!storeDone) {
@@ -399,9 +399,6 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
         iterResult = await generator.next();
       }
       return iterResult.value;
-    } catch (error) {
-      this.abortIfOwnershipLost(error);
-      throw error;
     } finally {
       await generator.return(EMPTY_EXECUTION_RESULT);
     }
@@ -451,24 +448,6 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
     };
     this.turn = { ...this.turn, state, updated_at: updatedAt };
     return turnDoneEvent(state, updatedAt.toISOString());
-  }
-
-  /**
-   * Another replica claimed this paused turn because our heartbeat key was missing.
-   * The client send that caused the claim was not delivered here. We notice on the next fenced write.
-   *
-   * Abort so the orchestrator stops. Closing the resolver does not stop it.
-   * The loop may be waiting for the next event, or running a tool before `running` is saved.
-   * Abort sets the signal and wakes that wait. The row stays with the new owner.
-   */
-  private abortIfOwnershipLost(error: unknown): void {
-    if (!(error instanceof TurnOwnershipLostError)) {
-      return;
-    }
-    const controller = this.streamAbort;
-    if (controller && !controller.signal.aborted) {
-      controller.abort(error);
-    }
   }
 
   private async closeResolver(resolver: ITurnResourceResolver<TTurnCustom>): Promise<void> {
