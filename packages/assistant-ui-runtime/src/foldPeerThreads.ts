@@ -59,9 +59,14 @@ export interface ThreadBucket {
   approvalDecisions: Map<string, ApprovalDecisionRef>;
   pendingResponses: Map<string, PendingResponseRef>;
   done: boolean;
+  /** Set when `thread.done.state.status === 'error'`. */
+  error?: string;
   title?: string;
   agentInfo?: AgentInfo;
 }
+
+/** When the parent turn is already terminal, unfinished children inherit this status. */
+export type ParentTerminalStatus = 'cancelled' | 'error';
 
 export interface ThreadParentLink {
   parentThreadId: string;
@@ -95,6 +100,8 @@ function assertRootThreadEvent(threadId: string, eventType: string): void {
 export class PeerThreadFoldState {
   readonly threads = new Map<string, ThreadBucket>();
   readonly threadParents = new Map<string, ThreadParentLink>();
+  /** History projection sets this while building content for a terminal parent turn. */
+  parentTerminalStatus: ParentTerminalStatus | undefined;
 
   getOrCreateBucket(threadId: string): ThreadBucket {
     let bucket = this.threads.get(threadId);
@@ -112,6 +119,24 @@ export class PeerThreadFoldState {
     }
     return bucket;
   }
+}
+
+function threadDoneErrorMessage(state: unknown): string | undefined {
+  if (typeof state !== 'object' || state == null) return undefined;
+  if (!('status' in state) || Reflect.get(state, 'status') !== 'error') return undefined;
+  const error = Reflect.get(state, 'error');
+  return typeof error === 'string' && error.length > 0 ? error : 'Sub-agent failed';
+}
+
+/** Cancel mid-stream can persist thread.done error "LLM stream aborted"; treat as cancel, not failure. */
+export function isAbortShapedThreadError(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  return (
+    normalized === 'llm stream aborted' ||
+    normalized === 'aborterror' ||
+    normalized.includes('stream aborted') ||
+    normalized.includes('aborterror')
+  );
 }
 
 function isTurnScopedEvent(
@@ -172,6 +197,10 @@ function ingestEventIntoBucket(bucket: ThreadBucket, message: TurnStreamingEvent
     bucket.done = true;
     if (message.title) {
       bucket.title = message.title;
+    }
+    const errorMessage = threadDoneErrorMessage(message.state);
+    if (errorMessage != null) {
+      bucket.error = errorMessage;
     }
   }
 }
@@ -303,15 +332,28 @@ function bucketHasUnresolvedPendingResponses(bucket: ThreadBucket): boolean {
   return false;
 }
 
-function bucketAssistantStatus(bucket: ThreadBucket): MessageStatus {
+function bucketAssistantStatus(bucket: ThreadBucket, state: PeerThreadFoldState): MessageStatus {
   if (bucket.pendingApprovals.size > 0) {
     return toolApprovalStatus();
   }
   if (bucketHasUnresolvedPendingResponses(bucket)) {
     return toolResponseStatus();
   }
-  if (!bucket.done && bucket.modelMessageIds.length > 0) {
-    return { type: 'running' };
+  if (state.parentTerminalStatus === 'cancelled') {
+    if (!bucket.done || (bucket.error != null && isAbortShapedThreadError(bucket.error))) {
+      return { type: 'incomplete', reason: 'cancelled' };
+    }
+  }
+  if (bucket.error != null) {
+    return { type: 'incomplete', reason: 'error', error: bucket.error };
+  }
+  if (!bucket.done) {
+    if (state.parentTerminalStatus === 'error') {
+      return { type: 'incomplete', reason: 'error', error: 'Parent turn failed' };
+    }
+    if (bucket.modelMessageIds.length > 0) {
+      return { type: 'running' };
+    }
   }
   return { type: 'complete', reason: 'stop' };
 }
@@ -447,7 +489,7 @@ function buildSubThreadMessages(state: PeerThreadFoldState, threadId: string): T
       id: `${threadId}-assistant`,
       role: 'assistant',
       content,
-      status: bucketAssistantStatus(bucket),
+      status: bucketAssistantStatus(bucket, state),
       createdAt: new Date(),
       metadata: {
         unstable_state: null,
