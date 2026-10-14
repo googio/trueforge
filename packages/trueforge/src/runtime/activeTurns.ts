@@ -38,6 +38,7 @@ export class ActiveTurnRegistry {
       this.turnLocks.set(key, mutex);
     }
     try {
+      // TODO (chiragjn): support acquire timeout
       return await mutex.runExclusive(fn);
     } finally {
       if (!mutex.isLocked()) {
