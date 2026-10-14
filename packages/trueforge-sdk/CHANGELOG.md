@@ -1,3 +1,5 @@
+## [0.179.0] - 2026-10-14
+
 ## [0.179.0-rc.1] - 2026-10-13
 
 ## [0.178.0] - 2026-10-09
@@ -15,6 +17,12 @@
 ## [0.2.1] - 2026-09-29
 
 ## [0.2.1-rc.0] - 2026-09-22
+
+## 0.179.0
+
+### Patch Changes
+
+- 694a572: Reject duplicate sandbox environment names on create (POST) instead of overwriting via upsert.
 
 ## 0.179.0-rc.1
 
