@@ -1,5 +1,11 @@
 # @truefoundry/trueforge
 
+## 0.179.1
+
+### Patch Changes
+
+- 217194b: Use the `rediss://` URL scheme for standalone Redis when `REDIS_TLS_ENABLED` is true so TLS connections advertise the secure protocol in the connection URL.
+
 ## 0.179.0
 
 ### Patch Changes
