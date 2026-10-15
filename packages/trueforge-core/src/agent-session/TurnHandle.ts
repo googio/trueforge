@@ -333,25 +333,26 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
       let turnDone: TurnDoneEvent | undefined;
       if (!ownershipLost) {
         try {
-          turnDone =
-            this.eventFromStoreConflict(caughtError, orchestrator) ??
-            (await this.persistTurnTerminal({
+          // TurnNotRunningError: another writer already terminated the turn — defer to its state.
+          if (caughtError instanceof TurnNotRunningError) {
+            turnDone = this.turnDoneFromStoreConflict(caughtError, orchestrator);
+          } else {
+            turnDone = await this.persistTurnTerminal({
               signal,
               caughtError,
               executeResult,
               orchestrator,
-            }));
+            });
+          }
         } catch (error) {
           if (error instanceof TurnOwnershipLostError) {
             ownershipLost = error;
+          } else if (error instanceof TurnNotRunningError) {
+            turnDone = this.turnDoneFromStoreConflict(error, orchestrator);
           } else {
-            const storeDone = this.eventFromStoreConflict(error, orchestrator);
-            if (!storeDone) {
-              await this.closeResolver(resolver);
-              // eslint-disable-next-line no-unsafe-finally -- terminal-state write failed; reject the stream
-              throw error;
-            }
-            turnDone = storeDone;
+            await this.closeResolver(resolver);
+            // eslint-disable-next-line no-unsafe-finally -- terminal-state write failed; reject the stream
+            throw error;
           }
         }
       }
@@ -436,11 +437,6 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
     });
     this.turn = { ...this.turn, state: terminalState, updated_at: updatedAt };
     return turnDone;
-  }
-
-  /** A TurnNotRunningError means another writer already terminated the turn — defer to its state. */
-  private eventFromStoreConflict(error: unknown, orchestrator: AgentThreadOrchestrator): TurnDoneEvent | undefined {
-    return error instanceof TurnNotRunningError ? this.turnDoneFromStoreConflict(error, orchestrator) : undefined;
   }
 
   private turnDoneFromStoreConflict(
