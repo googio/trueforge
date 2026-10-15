@@ -8,8 +8,11 @@ import {
   PointElement,
   ScatterController,
   Tooltip,
+  type ActiveElement,
   type ChartData,
   type ChartDataset,
+  type ChartEvent,
+  type Chart as ChartJsInstance,
   type ChartOptions,
   type Plugin,
 } from 'chart.js';
@@ -17,30 +20,37 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, 
 import { Chart } from 'react-chartjs-2';
 
 import { useThemeMode } from '../../theme/SlotsProvider.js';
-import { roundDurationMsToSecond } from '../../utils/sessionDisplayFormat.js';
+import { formatReadableDurationMs, roundDurationMsToSecond } from '../../utils/sessionDisplayFormat.js';
 import {
   getSessionEventColor,
   getSessionEventHoverColor,
   getSessionEventLabel,
   MAIN_THREAD_ID,
+  mergedPauseWallMs,
+  segmentsForTurnTooltip,
   type SessionEventTimelineSegment,
 } from '../../utils/sessionEventTimeline.js';
 import {
+  applyPauseChipLayout,
   buildTimelineAxisTicks,
-  formatTimelineAxisDuration,
-  getActiveTimelineMs,
   getSubAgentHoverGroups,
   getSubAgentLanes,
   getTimelineHoverTargetId,
   getTimelineLayout,
   getTimelineRange,
+  getTurnGapAnchorMs,
+  getTurnGapShiftsMs,
+  getWallTimelineMs,
   groupCoincidentTimelineMarkers,
   groupOverlappingToolCalls,
   mergeOverlappingSubAgentSegments,
+  packTimelineMarkers,
   TIMELINE_TYPE,
   type TimelineGap,
   type TimelineHoverTarget,
+  type TimelinePauseChipRange,
   type TimelineTurnBar,
+  type TimelineVisualGap,
 } from '../../utils/sessionEventTimelineChart.js';
 import { aggregateSessionTurnBand } from '../../utils/sessionTurnViews.js';
 import { LightTooltip } from '../primitives/Tooltip.js';
@@ -56,13 +66,66 @@ import type { AgentSessionEventTimelineChartProps } from './types.js';
 
 ChartJS.register(BarController, BarElement, LinearScale, PointElement, ScatterController, Tooltip);
 
+/** Diamond / min bar width in px. */
 const MARKER_PX = 4;
+/** Empty space drawn between turns (not real idle time). */
 const TURN_GAP_PX = 12;
+/** Fixed width of each hatched “Paused” chip. */
+const PAUSE_CHIP_PX = 32;
 const END_PAD_PX = 12;
 const BAR_RADIUS_PX = 2;
 const ROW_GAP_PX = 8;
 const MARKER_EVENT_GAP_PX = 2;
 const OVERHEAD_PX = 30;
+
+const hatchPatternCache = new Map<string, CanvasPattern | string>();
+
+/**
+ * Diagonal stripe fill for pause chips.
+ * Gray tokens invert under `.dark`, so resolve against a root that matches `isDark`
+ * and keep mode-correct fallbacks (light cyan wash / dark surface).
+ */
+function pauseHatchFill(color: string, isDark: boolean): CanvasPattern | string {
+  const strokeVar = isDark ? '--color-gray-400' : '--color-gray-600';
+  const fillVar = isDark ? '--secondary-bg' : '--color-gray-100';
+  const fillFallback = isDark ? '#27272a' : '#ecfeff';
+  const strokeFallback = isDark ? '#52525b' : '#52525b';
+  const key = `${color}:${fillVar}:${strokeVar}:${isDark ? 'd' : 'l'}:v2`;
+  const cached = hatchPatternCache.get(key);
+  if (cached != null) return cached;
+  if (typeof document === 'undefined') return color;
+  try {
+    const themedRoot =
+      document.querySelector(isDark ? '.aui-theme-root.dark' : '.aui-theme-root:not(.dark)') ??
+      document.querySelector('.aui-theme-root') ??
+      document.documentElement;
+    const styles = getComputedStyle(themedRoot);
+    const stroke = styles.getPropertyValue(strokeVar).trim() || strokeFallback;
+    // Light: soft cyan wash (waiting). Dark: secondary surface from theme (fallback #27272a).
+    const fillColor = isDark ? styles.getPropertyValue(fillVar).trim() || fillFallback : fillFallback;
+    const canvas = document.createElement('canvas');
+    canvas.width = 8;
+    canvas.height = 8;
+    const ctx = canvas.getContext('2d');
+    if (ctx == null) return color;
+    ctx.fillStyle = fillColor;
+    ctx.fillRect(0, 0, 8, 8);
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-2, 6);
+    ctx.lineTo(6, -2);
+    ctx.moveTo(2, 10);
+    ctx.lineTo(10, 2);
+    ctx.stroke();
+    const pattern = ctx.createPattern(canvas, 'repeat');
+    const fill = pattern ?? color;
+    hatchPatternCache.set(key, fill);
+    return fill;
+  } catch {
+    return color;
+  }
+}
 
 type BarPoint = { x: [number, number]; y: number };
 type MarkerPoint = { x: number; y: number };
@@ -82,6 +145,45 @@ function eventOrder(type: SessionEventTimelineSegment['type']): number {
   if (type === 'sub_agent') return 0;
   if (type === 'model') return 2;
   return 1;
+}
+
+/**
+ * Horizontal bars share x; Chart.js often returns every lane at that time.
+ * Prefer the element whose y is closest to the pointer; on a tie, higher order
+ * (pause hatch over model/tool).
+ */
+function pickTimelineHoverElement({
+  chart,
+  event,
+  elements,
+}: {
+  chart: ChartJsInstance;
+  event: ChartEvent;
+  elements: ActiveElement[];
+}): ActiveElement | undefined {
+  if (elements.length === 0) return undefined;
+  if (elements.length === 1) return elements[0];
+
+  const native = event.native;
+  const pointerY = native instanceof MouseEvent ? native.clientY - chart.canvas.getBoundingClientRect().top : null;
+
+  let best = elements[0];
+  let bestYDist = Number.POSITIVE_INFINITY;
+  let bestOrder = Number.NEGATIVE_INFINITY;
+  for (const element of elements) {
+    const meta = chart.getDatasetMeta(element.datasetIndex);
+    const point = meta.data[element.index ?? 0];
+    const y = point != null && 'y' in point && typeof point.y === 'number' ? point.y : Number.NaN;
+    const yDist = pointerY != null && Number.isFinite(y) ? Math.abs(y - pointerY) : 0;
+    const dataset = chart.data.datasets[element.datasetIndex];
+    const order = dataset != null && 'order' in dataset && typeof dataset.order === 'number' ? dataset.order : 0;
+    if (yDist < bestYDist - 0.5 || (Math.abs(yDist - bestYDist) <= 0.5 && order > bestOrder)) {
+      best = element;
+      bestYDist = yDist;
+      bestOrder = order;
+    }
+  }
+  return best;
 }
 
 function turnBarLabelPoint(element: object): { x: number; y: number } | null {
@@ -148,63 +250,168 @@ export function AgentSessionEventTimelineChart({
     };
   }, [refreshTooltipAnchor, tooltipTarget]);
 
+  // Compressed “active work” length (pauses already collapsed to points).
   const segmentTotalMs = Math.max(0, ...segments.map(segment => segment.endMs));
   const activeTotalMs = Math.max(1, roundDurationMsToSecond(segmentTotalMs));
-  const { turnStartsMs, turnOrdinals, turnRanges } = useMemo(() => getTimelineLayout(segments), [segments]);
+  const { turnStartsMs, turnRanges } = useMemo(() => getTimelineLayout(segments), [segments]);
   const activeTurnStartsMs = useMemo(
     () => turnStartsMs.filter((startMs, index) => index === 0 || startMs <= activeTotalMs),
     [activeTotalMs, turnStartsMs],
   );
-  const gapCount = Math.max(0, activeTurnStartsMs.length - 1);
-  const scaleWidthPx = Math.max(widthPx / 2, widthPx - TURN_GAP_PX * gapCount - END_PAD_PX);
+  const hideSubAgentThreads = hiddenTypes.has('sub_agent');
+  // Unique starts for scale/gaps — concurrent sub-agent pause chips share one slot.
+  const pauseChipStartsMs = useMemo(() => {
+    // Include compression-only chips so scale width still reserves PAUSE_CHIP_PX.
+    const starts = segments
+      .filter(segment => {
+        if (!segment.isPauseChip) return false;
+        if (hiddenTypes.has(segment.type)) return false;
+        // Hidden sub-agent lanes are dropped from layout, so their chips must not
+        // reserve an axis slot the remaining bars never shift through.
+        if (hideSubAgentThreads && segment.threadId !== MAIN_THREAD_ID) return false;
+        return true;
+      })
+      .map(segment => segment.startMs);
+    return [...new Set(starts)].sort((left, right) => left - right);
+  }, [hiddenTypes, hideSubAgentThreads, segments]);
+  const turnGapAnchorMs = useMemo(
+    () =>
+      getTurnGapAnchorMs({ turnRanges, pauseChipStartsMs }).filter(
+        startMs => startMs <= activeTotalMs || activeTurnStartsMs.includes(startMs),
+      ),
+    [activeTotalMs, activeTurnStartsMs, pauseChipStartsMs, turnRanges],
+  );
+  const gapCount = turnGapAnchorMs.length;
+  const pauseChipCount = pauseChipStartsMs.length;
+  // Reserve fixed px for turn gaps + pause chips, then map remaining width → ms.
+  const scaleWidthPx = Math.max(
+    widthPx / 2,
+    widthPx - TURN_GAP_PX * gapCount - PAUSE_CHIP_PX * pauseChipCount - END_PAD_PX,
+  );
   const msPerPx = activeTotalMs / Math.max(1, scaleWidthPx);
   const turnGapMs = TURN_GAP_PX * msPerPx;
-  const totalMs = activeTotalMs + gapCount * turnGapMs;
+  const pauseChipMs = PAUSE_CHIP_PX * msPerPx;
+  const turnGapShiftsMs = useMemo(
+    () => getTurnGapShiftsMs({ turnRanges, pauseChipStartsMs, turnGapMs }),
+    [pauseChipStartsMs, turnGapMs, turnRanges],
+  );
+  // Visual gaps drive both chart spacing and wall-time axis labels.
+  const visualGaps = useMemo<TimelineVisualGap[]>(() => {
+    const turnGaps = turnGapAnchorMs.map(atActiveMs => ({ atActiveMs, gapMs: turnGapMs }));
+    const pauseGapsByStart = new Map<number, TimelineVisualGap>();
+    for (const segment of segments) {
+      if (!segment.isPauseChip || hiddenTypes.has(segment.type)) continue;
+      if (hideSubAgentThreads && segment.threadId !== MAIN_THREAD_ID) continue;
+      if (pauseGapsByStart.has(segment.startMs)) continue;
+      pauseGapsByStart.set(segment.startMs, {
+        atActiveMs: segment.startMs,
+        gapMs: pauseChipMs,
+        containsAnchor: true,
+        wallDurationMs: segment.wallDurationMs ?? 0,
+      });
+    }
+    return [...turnGaps, ...pauseGapsByStart.values()].sort((left, right) => left.atActiveMs - right.atActiveMs);
+  }, [hiddenTypes, hideSubAgentThreads, pauseChipMs, segments, turnGapAnchorMs, turnGapMs]);
+  const totalMs = activeTotalMs + visualGaps.reduce((sum, gap) => sum + gap.gapMs, 0);
   const timelineMaxMs = totalMs + END_PAD_PX * msPerPx;
-  const timelineGaps = useMemo<TimelineGap[]>(
-    () =>
-      activeTurnStartsMs
-        .slice(1)
-        .map((startMs, index) => ({ startMs: startMs + index * turnGapMs, endMs: startMs + (index + 1) * turnGapMs })),
-    [activeTurnStartsMs, turnGapMs],
-  );
 
-  const visibleSegments = useMemo(
-    () =>
-      segments.flatMap(segment => {
-        if (hiddenTypes.has(segment.type)) return [];
-        const shiftMs = (turnOrdinals.get(segment.turnIndex) ?? 0) * turnGapMs;
-        return [{ ...segment, startMs: segment.startMs + shiftMs, endMs: segment.endMs + shiftMs }];
-      }),
-    [hiddenTypes, segments, turnGapMs, turnOrdinals],
+  // Shift later turns for separators, then expand each pause chip to pauseChipMs.
+  // Hiding "Sub-agent" drops that type and every non-main thread (markers/pauses stay off main).
+  const visibleSegments = useMemo(() => {
+    const turnShifted = segments.flatMap(segment => {
+      if (hiddenTypes.has(segment.type)) return [];
+      if (hideSubAgentThreads && segment.threadId !== MAIN_THREAD_ID) return [];
+      const shiftMs = turnGapShiftsMs.get(segment.turnIndex) ?? 0;
+      return [{ ...segment, startMs: segment.startMs + shiftMs, endMs: segment.endMs + shiftMs }];
+    });
+    return applyPauseChipLayout({ segments: turnShifted, pauseChipMs });
+  }, [hiddenTypes, hideSubAgentThreads, pauseChipMs, segments, turnGapShiftsMs]);
+  const pauseChipSegments = useMemo(
+    () => visibleSegments.filter(segment => segment.isPauseChip && !segment.isCompressionOnly),
+    [visibleSegments],
   );
+  const pauseSpanSegments = useMemo(
+    () => visibleSegments.filter(segment => segment.isPauseSpan && !segment.isCompressionOnly),
+    [visibleSegments],
+  );
+  const pauseHatchSegments = useMemo(
+    () => [...pauseChipSegments, ...pauseSpanSegments],
+    [pauseChipSegments, pauseSpanSegments],
+  );
+  const pauseChipRanges = useMemo<TimelinePauseChipRange[]>(
+    () =>
+      pauseHatchSegments.map(segment => ({
+        id: segment.id,
+        startMs: segment.startMs,
+        endMs: segment.endMs,
+        wallDurationMs: segment.wallDurationMs ?? Math.max(0, segment.endMs - segment.startMs),
+        threadId: segment.threadId,
+      })),
+    [pauseHatchSegments],
+  );
+  // Merge near-identical x diamonds, then spread pause ones across each chip.
   const markerGroups = useMemo(
-    () => groupCoincidentTimelineMarkers(visibleSegments, { toleranceMs: MARKER_PX * msPerPx }),
+    () =>
+      groupCoincidentTimelineMarkers(
+        visibleSegments.filter(segment => !segment.isPauseChip && !segment.isPauseSpan),
+        { toleranceMs: MARKER_PX * msPerPx },
+      ),
     [msPerPx, visibleSegments],
   );
-  const durationSegments = useMemo(() => visibleSegments.filter(segment => !segment.isMarker), [visibleSegments]);
-  const turnBars = useMemo<TimelineTurnBar[]>(
-    () =>
-      turnRanges.length < 2
-        ? []
-        : turnRanges.map(range => ({
-            ...range,
-            id: `turn-${range.turnIndex}`,
-            durationMs: range.endMs - range.startMs,
-            startMs: range.startMs + range.ordinal * turnGapMs,
-            endMs: range.endMs + range.ordinal * turnGapMs + MARKER_PX * msPerPx,
-          })),
-    [msPerPx, turnGapMs, turnRanges],
+  const packedMarkers = useMemo(
+    () => packTimelineMarkers({ groups: markerGroups, pauseChips: pauseChipRanges }),
+    [markerGroups, pauseChipRanges],
   );
+  const durationSegments = useMemo(
+    () => visibleSegments.filter(segment => !segment.isMarker && !segment.isPauseChip && !segment.isPauseSpan),
+    [visibleSegments],
+  );
+  const turnBars = useMemo<TimelineTurnBar[]>(() => {
+    if (turnRanges.length < 2) return [];
+    return turnRanges.map(range => {
+      const inTurn = visibleSegments.filter(segment => segment.turnIndex === range.turnIndex);
+      const fallbackStart = range.startMs + (turnGapShiftsMs.get(range.turnIndex) ?? 0);
+      const startMs = inTurn.reduce((min, segment) => Math.min(min, segment.startMs), fallbackStart);
+      const endMs = inTurn.reduce((max, segment) => Math.max(max, segment.endMs), startMs) + MARKER_PX * msPerPx;
+      // Compressed range omits pause waits. Merge chips with spans so a sibling
+      // that is still waiting after resume is included once.
+      const pauseWallMs = mergedPauseWallMs(segments.filter(segment => segment.turnIndex === range.turnIndex));
+      return {
+        ...range,
+        id: `turn-${range.turnIndex}`,
+        durationMs: range.endMs - range.startMs + pauseWallMs,
+        startMs,
+        endMs,
+      };
+    });
+  }, [msPerPx, segments, turnGapShiftsMs, turnRanges, visibleSegments]);
   const subAgentSegments = useMemo(
     () => durationSegments.filter(segment => segment.type === 'sub_agent'),
     [durationSegments],
   );
   const mainSubAgents = useMemo(() => mergeOverlappingSubAgentSegments(subAgentSegments), [subAgentSegments]);
-  const subAgentGroups = useMemo(
-    () => getSubAgentHoverGroups({ bars: mainSubAgents, subAgentSegments }),
-    [mainSubAgents, subAgentSegments],
-  );
+  const subAgentGroups = useMemo(() => {
+    const groups = getSubAgentHoverGroups({ bars: mainSubAgents, subAgentSegments });
+    // Chart span is compressed (pause chips are points); add wall waits for tooltip duration.
+    return groups.map(group => {
+      const threadIds = new Set(group.segments.map(segment => segment.threadId));
+      const compressed = segments.filter(segment => segment.type === 'sub_agent' && threadIds.has(segment.threadId));
+      const activeStartMs = compressed.reduce(
+        (min, segment) => Math.min(min, segment.startMs),
+        Number.POSITIVE_INFINITY,
+      );
+      const activeEndMs = compressed.reduce((max, segment) => Math.max(max, segment.endMs), 0);
+      const activeMs =
+        Number.isFinite(activeStartMs) && activeEndMs >= activeStartMs
+          ? activeEndMs - activeStartMs
+          : group.endMs - group.startMs;
+      const turnIndex = group.segments[0]?.turnIndex;
+      const pauseWallMs = mergedPauseWallMs(
+        segments.filter(segment => segment.turnIndex === turnIndex && threadIds.has(segment.threadId)),
+      );
+      return { ...group, durationMs: activeMs + pauseWallMs };
+    });
+  }, [mainSubAgents, segments, subAgentSegments]);
   const subAgentLanes = useMemo(
     () => getSubAgentLanes({ subAgentSegments, threadSegments: durationSegments, minWidthMs: MARKER_PX * msPerPx }),
     [durationSegments, msPerPx, subAgentSegments],
@@ -252,22 +459,105 @@ export function AgentSessionEventTimelineChart({
     [groupedIds, mainCandidates],
   );
   const laneCount = subAgentLanes.reduce((count, lane) => Math.max(count, lane.lane + 1), 0);
+  const laneByThreadId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const lane of subAgentLanes) map.set(lane.threadId, lane.lane);
+    return map;
+  }, [subAgentLanes]);
   const hasTurnRow = turnBars.length > 0;
   const markerRow = hasTurnRow ? 1 : 0;
   const eventRow = markerRow + 1;
+  // Sub-agent diamonds sit on a dedicated row above their lane bar (like main markers).
+  const lanesWithMarkers = useMemo(() => {
+    const lanes = new Set<number>();
+    for (const marker of packedMarkers) {
+      const threadIds = new Set(marker.segments.map(segment => segment.threadId));
+      if (threadIds.size !== 1) continue;
+      const threadId = [...threadIds][0];
+      if (threadId == null || threadId === MAIN_THREAD_ID) continue;
+      const lane = laneByThreadId.get(threadId);
+      if (lane != null) lanes.add(lane);
+    }
+    return lanes;
+  }, [laneByThreadId, packedMarkers]);
+  const subAgentRowIndex = useMemo(() => {
+    const markerRows = new Map<number, number>();
+    const barRows = new Map<number, number>();
+    let row = eventRow + 1;
+    for (let lane = 0; lane < laneCount; lane += 1) {
+      if (lanesWithMarkers.has(lane)) {
+        markerRows.set(lane, row);
+        row += 1;
+      }
+      barRows.set(lane, row);
+      row += 1;
+    }
+    return { markerRows, barRows };
+  }, [eventRow, laneCount, lanesWithMarkers]);
   const { centers, band } = useMemo(() => {
-    const heights = [...(hasTurnRow ? [16] : []), 10, 28, ...Array.from({ length: laneCount }, () => 12)];
+    const heights = [
+      ...(hasTurnRow ? [16] : []),
+      10,
+      28,
+      ...Array.from({ length: laneCount }, (_, lane) =>
+        lanesWithMarkers.has(lane) ? ([10, 12] as const) : ([12] as const),
+      ).flat(),
+    ];
     const gaps = heights.map((_, index) => {
       if (index === heights.length - 1) return 0;
+      // Tight gap between a lane's marker row and its bar.
+      if (index > eventRow && heights[index] === 10 && heights[index + 1] === 12) return MARKER_EVENT_GAP_PX;
       return index === markerRow ? MARKER_EVENT_GAP_PX : ROW_GAP_PX;
     });
     return rowCenters({ heights, gaps });
-  }, [hasTurnRow, laneCount, markerRow]);
+  }, [eventRow, hasTurnRow, laneCount, lanesWithMarkers, markerRow]);
 
+  const yForSubAgentBar = useCallback(
+    (lane: number) => centers[subAgentRowIndex.barRows.get(lane) ?? eventRow + 1 + lane] ?? 0,
+    [centers, eventRow, subAgentRowIndex.barRows],
+  );
+  const yForSubAgentMarker = useCallback(
+    (lane: number) => {
+      const markerRowIndex = subAgentRowIndex.markerRows.get(lane);
+      if (markerRowIndex != null) return centers[markerRowIndex] ?? yForSubAgentBar(lane);
+      return yForSubAgentBar(lane);
+    },
+    [centers, subAgentRowIndex.markerRows, yForSubAgentBar],
+  );
+
+  /** Main event/marker row, or the matching sub-agent bar/marker row. No main fallback for orphan threads. */
+  const yForThread = useCallback(
+    (threadId: string, mainY: number, { forMarker = false }: { forMarker?: boolean } = {}) => {
+      if (threadId === MAIN_THREAD_ID) return mainY;
+      const lane = laneByThreadId.get(threadId);
+      if (lane == null) return null;
+      return forMarker ? yForSubAgentMarker(lane) : yForSubAgentBar(lane);
+    },
+    [laneByThreadId, yForSubAgentBar, yForSubAgentMarker],
+  );
+  const hasThreadLane = useCallback(
+    (threadId: string) => threadId === MAIN_THREAD_ID || laneByThreadId.has(threadId),
+    [laneByThreadId],
+  );
+  // Drop sub-thread markers/pauses that have no lane (never fall back onto the main bar).
+  const displayMarkers = useMemo(
+    () =>
+      packedMarkers.filter(marker => {
+        const threadIds = new Set(marker.segments.map(segment => segment.threadId));
+        const threadId = threadIds.size === 1 ? ([...threadIds][0] ?? MAIN_THREAD_ID) : MAIN_THREAD_ID;
+        return hasThreadLane(threadId);
+      }),
+    [hasThreadLane, packedMarkers],
+  );
+  const displayPauseChips = useMemo(
+    () => pauseHatchSegments.filter(segment => hasThreadLane(segment.threadId)),
+    [hasThreadLane, pauseHatchSegments],
+  );
+
+  // Dataset paint order: bars → pause hatch (above tools) → markers (top).
   const chartTargets = useMemo<Array<TimelineHoverTarget | null>>(
     () => [
       ...turnBars.map((bar): TimelineHoverTarget => ({ type: TIMELINE_TYPE.turn, bar })),
-      ...markerGroups.map((group): TimelineHoverTarget => ({ type: TIMELINE_TYPE.markerGroup, group })),
       ...subAgentEventSegments.map(({ segment }): TimelineHoverTarget => ({ type: TIMELINE_TYPE.event, segment })),
       ...subAgentToolCallGroups.map(({ group, subAgentLabel }): TimelineHoverTarget => ({
         type: TIMELINE_TYPE.toolCallGroup,
@@ -280,10 +570,21 @@ export function AgentSessionEventTimelineChart({
         return group == null ? { type: TIMELINE_TYPE.event, segment } : { type: TIMELINE_TYPE.subAgentGroup, group };
       }),
       ...toolCallGroups.map((group): TimelineHoverTarget => ({ type: TIMELINE_TYPE.toolCallGroup, group })),
+      ...displayPauseChips.map((segment): TimelineHoverTarget => ({ type: TIMELINE_TYPE.event, segment })),
+      ...displayMarkers.map((marker): TimelineHoverTarget => ({
+        type: TIMELINE_TYPE.markerGroup,
+        group: {
+          id: marker.id,
+          startMs: marker.x,
+          endMs: marker.x,
+          segments: marker.segments,
+        },
+      })),
     ],
     [
+      displayMarkers,
+      displayPauseChips,
       mainEventSegments,
-      markerGroups,
       subAgentEventSegments,
       subAgentGroups,
       subAgentToolCallGroups,
@@ -300,7 +601,6 @@ export function AgentSessionEventTimelineChart({
     hover,
     thickness,
     order = 1,
-    inflateAmount,
   }: {
     label: string;
     range: TimelineGap;
@@ -309,7 +609,6 @@ export function AgentSessionEventTimelineChart({
     hover: string;
     thickness: number;
     order?: number;
-    inflateAmount?: number;
   }) => ({
     label,
     data: [{ x: getTimelineRange(range), y }] satisfies BarPoint[],
@@ -319,11 +618,11 @@ export function AgentSessionEventTimelineChart({
     borderWidth: 0,
     borderSkipped: false,
     borderRadius: BAR_RADIUS_PX,
-    minBarLength: MARKER_PX,
+    // No min width on duration bars — expanding into the pause hatch causes overlap.
+    minBarLength: 0,
     barThickness: thickness,
     grouped: false,
     order,
-    ...(inflateAmount == null ? {} : { inflateAmount }),
   });
 
   const chartData = useMemo<ChartData<TimelineChartType, Array<BarPoint | MarkerPoint>, string>>(
@@ -339,45 +638,26 @@ export function AgentSessionEventTimelineChart({
             thickness: 16,
           }),
         ),
-        ...markerGroups.map(group => {
-          const type = group.segments.length === 1 ? group.segments[0]?.type : 'system';
-          const color = getSessionEventColor(type ?? 'system', isDark);
-          return {
-            type: 'scatter' as const,
-            label: group.segments.map(segment => getSessionEventLabel(segment.type)).join(', '),
-            data: [{ x: group.startMs, y: centers[markerRow] ?? 0 }] satisfies MarkerPoint[],
-            pointStyle: 'rectRot' as const,
-            pointRadius: 5,
-            pointHoverRadius: 6,
-            clip: false,
-            backgroundColor: color,
-            hoverBackgroundColor: getSessionEventHoverColor(type ?? 'system', isDark),
-            borderWidth: 0,
-            order: 0,
-          } satisfies ChartDataset<'scatter', MarkerPoint[]>;
-        }),
         ...subAgentEventSegments.map(({ segment, lane }) =>
           barDataset({
             label: `${getSessionEventLabel(segment.type)}: ${segment.title}`,
             range: segment,
-            y: centers[eventRow + 1 + lane] ?? 0,
+            y: yForSubAgentBar(lane),
             color: getSessionEventColor(segment.type, isDark),
             hover: getSessionEventHoverColor(segment.type, isDark),
             thickness: 12,
             order: eventOrder(segment.type),
-            inflateAmount: 0.5,
           }),
         ),
         ...subAgentToolCallGroups.map(({ group, lane }) =>
           barDataset({
             label: 'Parallel tool calls',
             range: group,
-            y: centers[eventRow + 1 + lane] ?? 0,
+            y: yForSubAgentBar(lane),
             color: getSessionEventColor('tool_call', isDark),
             hover: getSessionEventHoverColor('tool_call', isDark),
             thickness: 12,
             order: eventOrder('tool_call'),
-            inflateAmount: 0.5,
           }),
         ),
         ...mainEventSegments.map(segment =>
@@ -389,7 +669,6 @@ export function AgentSessionEventTimelineChart({
             hover: getSessionEventHoverColor(segment.type, isDark),
             thickness: 28,
             order: eventOrder(segment.type),
-            inflateAmount: 0.5,
           }),
         ),
         ...toolCallGroups.map(group =>
@@ -401,17 +680,61 @@ export function AgentSessionEventTimelineChart({
             hover: getSessionEventHoverColor('tool_call', isDark),
             thickness: 28,
             order: eventOrder('tool_call'),
-            inflateAmount: 0.5,
           }),
         ),
+        // After tool bars so the hatch isn’t covered; markers stay last (on top).
+        ...displayPauseChips.map(segment => {
+          const color = getSessionEventColor('waiting_on_human', isDark);
+          const onSubAgent = segment.threadId !== MAIN_THREAD_ID && laneByThreadId.has(segment.threadId);
+          return {
+            ...barDataset({
+              label: 'Paused',
+              range: segment,
+              y: yForThread(segment.threadId, centers[eventRow] ?? 0) ?? 0,
+              color,
+              hover: getSessionEventHoverColor('waiting_on_human', isDark),
+              thickness: onSubAgent ? 12 : 28,
+              order: 4,
+            }),
+            backgroundColor: pauseHatchFill(color, isDark),
+            hoverBackgroundColor: pauseHatchFill(color, isDark),
+            minBarLength: 0,
+          };
+        }),
+        ...displayMarkers.map(marker => {
+          const type = marker.segments.length === 1 ? marker.segments[0]?.type : 'system';
+          const color = getSessionEventColor(type ?? 'system', isDark);
+          const threadIds = new Set(marker.segments.map(segment => segment.threadId));
+          const threadId = threadIds.size === 1 ? ([...threadIds][0] ?? MAIN_THREAD_ID) : MAIN_THREAD_ID;
+          return {
+            type: 'scatter' as const,
+            label: marker.segments.map(segment => getSessionEventLabel(segment.type)).join(', '),
+            data: [
+              {
+                x: marker.x,
+                y: yForThread(threadId, centers[markerRow] ?? 0, { forMarker: true }) ?? 0,
+              },
+            ] satisfies MarkerPoint[],
+            pointStyle: 'rectRot' as const,
+            pointRadius: 5,
+            pointHoverRadius: 6,
+            clip: false,
+            backgroundColor: color,
+            hoverBackgroundColor: getSessionEventHoverColor(type ?? 'system', isDark),
+            borderWidth: 0,
+            order: 5,
+          } satisfies ChartDataset<'scatter', MarkerPoint[]>;
+        }),
       ],
     }),
     [
       centers,
+      displayMarkers,
+      displayPauseChips,
       eventRow,
       isDark,
+      laneByThreadId,
       mainEventSegments,
-      markerGroups,
       markerRow,
       subAgentEventSegments,
       subAgentToolCallGroups,
@@ -419,6 +742,8 @@ export function AgentSessionEventTimelineChart({
       turnBars,
       turnFill,
       turnHover,
+      yForSubAgentBar,
+      yForThread,
     ],
   );
 
@@ -460,12 +785,16 @@ export function AgentSessionEventTimelineChart({
       animation: false,
       responsive: true,
       maintainAspectRatio: false,
-      onClick: (_event, elements) => {
-        const target = chartTargets[elements[0]?.datasetIndex ?? -1];
+      // Resolve by x and y so sibling lanes at the same time don’t steal hover.
+      interaction: { mode: 'nearest', axis: 'xy', intersect: true },
+      onClick: (event, elements, chart) => {
+        const picked = pickTimelineHoverElement({ chart, event, elements });
+        const target = chartTargets[picked?.datasetIndex ?? -1];
         if (target?.type === TIMELINE_TYPE.turn) onSelectTurn?.(target.bar.turnIndex);
       },
-      onHover: (event, elements) => {
-        const hoveredDatasetIndex = elements[0]?.datasetIndex;
+      onHover: (event, elements, chart) => {
+        const picked = pickTimelineHoverElement({ chart, event, elements });
+        const hoveredDatasetIndex = picked?.datasetIndex;
         const next = hoveredDatasetIndex == null ? null : (chartTargets[hoveredDatasetIndex] ?? null);
         const native = event.native;
         if (native?.target instanceof HTMLElement) {
@@ -497,7 +826,7 @@ export function AgentSessionEventTimelineChart({
           grid: { color: grid },
           border: { color: grid },
           afterBuildTicks: scale => {
-            scale.ticks = buildTimelineAxisTicks({ activeTotalMs, turnStartsMs: activeTurnStartsMs, turnGapMs });
+            scale.ticks = buildTimelineAxisTicks({ activeTotalMs, visualGaps });
           },
           ticks: {
             color: axis,
@@ -505,10 +834,11 @@ export function AgentSessionEventTimelineChart({
             autoSkip: false,
             includeBounds: false,
             maxTicksLimit: 9,
+            // Chart x is compressed; labels jump by wall wait across pause chips.
             callback: value => {
               const timelineMs = Number(value);
               return timelineMs <= totalMs
-                ? formatTimelineAxisDuration(getActiveTimelineMs(timelineMs, timelineGaps))
+                ? formatReadableDurationMs(getWallTimelineMs({ valueMs: timelineMs, visualGaps }))
                 : '';
             },
           },
@@ -526,17 +856,15 @@ export function AgentSessionEventTimelineChart({
     }),
     [
       activeTotalMs,
-      activeTurnStartsMs,
       axis,
       band,
       chartTargets,
       grid,
       onSelectTurn,
       refreshTooltipAnchor,
-      timelineGaps,
       timelineMaxMs,
       totalMs,
-      turnGapMs,
+      visualGaps,
     ],
   );
 
@@ -549,7 +877,7 @@ export function AgentSessionEventTimelineChart({
         turn={tooltipTurn}
         turnNumber={tooltipTarget.bar.ordinal + 1}
         durationMs={tooltipTarget.bar.durationMs}
-        segments={segments.filter(segment => segment.turnIndex === tooltipTarget.bar.turnIndex)}
+        segments={segmentsForTurnTooltip(segments.filter(segment => segment.turnIndex === tooltipTarget.bar.turnIndex))}
       />
     ) : tooltipTarget?.type === TIMELINE_TYPE.event && hasSessionEventTooltip(tooltipTarget.segment) ? (
       <SessionEventTooltip
