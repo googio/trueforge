@@ -614,13 +614,19 @@ export class InMemorySessionStore<
     this.requireNonTerminalTurn(input);
     const list = this.inboundEvents.get(turnKey(input)) ?? [];
     const byId = new Map(list.map(row => [row.event.id, row]));
-    for (const eventId of input.event_ids) {
+    const uniqueIds = [...new Set(input.event_ids)];
+    // Check all ids first so a missing id rolls back like the DB backends.
+    const rows: StoredInboundEvent[] = [];
+    for (const eventId of uniqueIds) {
       const row = byId.get(eventId);
       if (!row) {
         throw new SessionStoreInvariantError(
           `Inbound event not found for mark-consumed: ${input.session_id}/${input.turn_id}/${eventId}`,
         );
       }
+      rows.push(row);
+    }
+    for (const row of rows) {
       row.consumed = true;
     }
   }

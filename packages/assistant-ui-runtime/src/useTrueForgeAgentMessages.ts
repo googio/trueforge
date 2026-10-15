@@ -1119,6 +1119,10 @@ export function useTrueForgeAgentMessages({
         throw new Error('Cannot send a required-action event without an active turn.');
       }
 
+      // Capture pre-submit overlays so a failed policy send only undoes ids
+      // this submission newly set — not siblings that already had an overlay
+      // while still pending in the fold.
+      const priorApprovalIds = new Set(snapshotRef.current.requiredActions.approvals.keys());
       actionSubmissionsRef.current.add(submissionId);
       snapshotRef.current = optimisticSnapshot;
       setSnapshot(optimisticSnapshot);
@@ -1153,12 +1157,8 @@ export function useTrueForgeAgentMessages({
             } else if (event.type === EVENT_TYPE.USER_TOOL_RESPONSE) {
               toolResponses.delete(event.toolCallId);
             } else if (event.type === EVENT_TYPE.USER_TOOL_APPROVAL_POLICY) {
-              // Undo optimistic allows for this policy when the send fails.
-              for (const item of event.policies) {
-                for (const toolCallId of collectPendingApprovalIdsMatchingPolicy(previous.fold, {
-                  serverName: item.serverName,
-                  name: item.name,
-                })) {
+              for (const toolCallId of optimisticSnapshot.requiredActions.approvals.keys()) {
+                if (!priorApprovalIds.has(toolCallId)) {
                   approvals.delete(toolCallId);
                 }
               }

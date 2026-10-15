@@ -416,7 +416,7 @@ export interface ISessionStore<
    * Marks inbox rows consumed. Tip must be non-terminal — terminal tip →
    * {@link TurnNotRunningError}. Empty `event_ids` is a no-op. Already-consumed
    * ids are idempotent. Unknown `event_id` on that tip →
-   * {@link SessionStoreInvariantError}.
+   * {@link SessionStoreInvariantError} with no rows left consumed from the batch.
    */
   markTurnInboundEventsConsumed(input: MarkTurnInboundEventsConsumedInput): Promise<void>;
 

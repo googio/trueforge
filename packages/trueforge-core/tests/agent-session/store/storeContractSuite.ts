@@ -3134,6 +3134,23 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
         }),
       ).rejects.toBeInstanceOf(SessionStoreInvariantError);
 
+      // Mixed batch with a missing id must not leave earlier ids consumed.
+      await expect(
+        store.markTurnInboundEventsConsumed({
+          session_id: sessionId,
+          turn_id: 'turn-1',
+          event_ids: [evtB.id, 'evt-missing'],
+        }),
+      ).rejects.toBeInstanceOf(SessionStoreInvariantError);
+      expect(
+        (
+          await store.listUnconsumedTurnInboundEvents({
+            session_id: sessionId,
+            turn_id: 'turn-1',
+          })
+        ).map(event => event.id),
+      ).toEqual([evtB.id]);
+
       await store.markTurnInboundEventsConsumed({
         session_id: sessionId,
         turn_id: 'turn-1',
