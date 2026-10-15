@@ -304,9 +304,7 @@ function historyPaginationFromWindow(window: {
   return {
     hasOlder: window.hasOlder,
     ...(window.olderPageToken != null ? { olderPageToken: window.olderPageToken } : {}),
-    ...(window.hasOlder && window.leadingIncomplete.length > 0
-      ? { leadingIncomplete: window.leadingIncomplete }
-      : {}),
+    ...(window.hasOlder && window.leadingIncomplete.length > 0 ? { leadingIncomplete: window.leadingIncomplete } : {}),
   };
 }
 

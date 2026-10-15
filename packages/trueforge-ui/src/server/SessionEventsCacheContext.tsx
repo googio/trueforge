@@ -5,13 +5,7 @@ import { createContext, useContext, type ReactNode } from 'react';
 
 const SessionEventsCacheContext = createContext<SessionEventsCache | null>(null);
 
-export function SessionEventsCacheProvider({
-  cache,
-  children,
-}: {
-  cache: SessionEventsCache;
-  children: ReactNode;
-}) {
+export function SessionEventsCacheProvider({ cache, children }: { cache: SessionEventsCache; children: ReactNode }) {
   return <SessionEventsCacheContext.Provider value={cache}>{children}</SessionEventsCacheContext.Provider>;
 }
 

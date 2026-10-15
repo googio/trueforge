@@ -35,8 +35,7 @@ export function useSessionEvents({
   onError,
 }: UseSessionEventsOptions): UseSessionEventsResult {
   const sessionEventsCache = useOptionalSessionEventsCache();
-  const cachedInitial =
-    sessionId != null && sessionId.length > 0 ? sessionEventsCache?.get(sessionId) : undefined;
+  const cachedInitial = sessionId != null && sessionId.length > 0 ? sessionEventsCache?.get(sessionId) : undefined;
   const paintInitial = hasPaintableCache(cachedInitial);
 
   const [events, setEvents] = useState<SessionEventItem[] | undefined>(() =>
@@ -45,9 +44,7 @@ export function useSessionEvents({
   const [session, setSession] = useState<Session | undefined>(() =>
     paintInitial ? cachedInitial?.session : undefined,
   );
-  const [loading, setLoading] = useState(
-    () => !paintInitial && sessionId != null && sessionId.length > 0,
-  );
+  const [loading, setLoading] = useState(() => !paintInitial && sessionId != null && sessionId.length > 0);
   const [failed, setFailed] = useState(false);
   const [isRevalidating, setIsRevalidating] = useState(false);
 
