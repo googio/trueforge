@@ -548,6 +548,7 @@ export class InMemorySessionStore<
   }
 
   async patchThreadsMCPAuth(input: PatchThreadsMCPAuthInput): Promise<void> {
+    this.requireOwnedTurn(input);
     const turn = this.requireNonTerminalTurn(input);
     const threads = input.thread_ids.map(threadId => {
       const thread = turn.snapshot.threads[threadId];

@@ -185,12 +185,14 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
         }),
       () =>
         store.patchThreadsMCPAuth({
+          active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
           ...keys,
           thread_ids: [MAIN_THREAD_ID],
           pending_mcp_auth: true,
         }),
       () =>
         store.patchThreadsMCPAuth({
+          active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
           ...keys,
           thread_ids: [MAIN_THREAD_ID],
           pending_mcp_auth: false,
@@ -2868,6 +2870,7 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
       await store.patchThreadsMCPAuth({
         session_id: sessionId,
         turn_id: 'turn-1',
+        active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
         thread_ids: [MAIN_THREAD_ID],
         pending_mcp_auth: true,
       });
@@ -2888,6 +2891,7 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
       await store.patchThreadsMCPAuth({
         session_id: sessionId,
         turn_id: 'turn-1',
+        active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
         thread_ids: [MAIN_THREAD_ID],
         pending_mcp_auth: false,
       });
@@ -2919,6 +2923,7 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
         store.patchThreadsMCPAuth({
           session_id: sessionId,
           turn_id: 'turn-1',
+          active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
           thread_ids: ['missing-thread'],
           pending_mcp_auth: true,
         }),
@@ -4111,6 +4116,17 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
             thread_id: MAIN_THREAD_ID,
             key: 'tfy.plan',
             state: { step: 1 },
+          }),
+      ],
+      [
+        'patchThreadsMCPAuth',
+        store =>
+          store.patchThreadsMCPAuth({
+            session_id: sessionId,
+            turn_id: 'turn-1',
+            active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
+            thread_ids: [MAIN_THREAD_ID],
+            pending_mcp_auth: true,
           }),
       ],
     ];

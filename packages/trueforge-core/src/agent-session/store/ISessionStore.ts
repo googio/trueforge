@@ -236,9 +236,7 @@ export interface PatchThreadCapabilityStateInput extends TurnProgressKeys {
   state: JsonValue;
 }
 
-export interface PatchThreadsMCPAuthInput {
-  session_id: string;
-  turn_id: string;
+export interface PatchThreadsMCPAuthInput extends TurnProgressKeys {
   thread_ids: string[];
   pending_mcp_auth: boolean;
 }
@@ -443,7 +441,7 @@ export interface ISessionStore<
   /** Generic capability KV — store has zero Plan/feature knowledge. */
   patchThreadCapabilityState(input: PatchThreadCapabilityStateInput): Promise<void>;
 
-  /** Patches the MCP-auth wait state of the supplied threads. */
+  /** Patches the MCP-auth wait state of the supplied threads. Must still own the turn. */
   patchThreadsMCPAuth(input: PatchThreadsMCPAuthInput): Promise<void>;
 
   /** Paginated read ordered lexically by monotonic `event.id` (asc default). */

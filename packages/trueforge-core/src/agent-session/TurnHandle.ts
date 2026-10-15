@@ -22,6 +22,7 @@ import type { AgentThreadOrchestrator } from '../core/runtime/AgentThreadOrchest
 import { getEmptyCurrentContextUsage } from '../core/runtime/contextUsage';
 import { isInternalThreadDoneCancelled } from '../core/runtime/contextUtils';
 import type { AgentThreadMetrics } from '../core/runtime/metrics';
+import { waitUntilAborted } from '../core/util/abort';
 import type { ITurnResourceResolver } from './ITurnResourceResolver';
 import type { TurnRecord } from './models/TurnRecord';
 import {
@@ -323,9 +324,8 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
     } catch (error) {
       caughtError = error instanceof Error ? error : new Error(String(error));
       if (caughtError instanceof TurnOwnershipLostError) {
-        // The row belongs to another replica. Skip the terminal write.
-        // A paused loop that is not writing stays parked until keepalive offload,
-        // or until a later event on this replica aborts the in-memory handle.
+        // executeAndPersist already waited for abort. Skip the terminal write.
+        // The row belongs to the other replica.
         ownershipLost = caughtError;
       }
     } finally {
@@ -406,6 +406,14 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
         iterResult = await generator.next();
       }
       return iterResult.value;
+    } catch (error) {
+      if (error instanceof TurnOwnershipLostError) {
+        // The write lost the owner check. Leave this generator suspended.
+        // Offload, or a later event on this replica, aborts the handle.
+        // return() before that would unwind the loop and drop it from memory.
+        await waitUntilAborted(signal);
+      }
+      throw error;
     } finally {
       await generator.return(EMPTY_EXECUTION_RESULT);
     }

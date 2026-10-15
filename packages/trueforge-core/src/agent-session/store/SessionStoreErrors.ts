@@ -100,7 +100,7 @@ export class PreviousTurnRunningError extends SessionStoreConflictError {
   }
 }
 
-/** Progress write lost the `active_executor_id` compare-and-set. The local machine must stop. */
+/** Progress write lost the `active_executor_id` compare-and-set. The write did not land. */
 export class TurnOwnershipLostError extends SessionStoreConflictError {
   readonly turn_id: string;
   readonly active_executor_id: string;
