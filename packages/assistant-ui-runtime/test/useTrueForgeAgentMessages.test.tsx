@@ -1717,12 +1717,13 @@ describe('useTrueForgeAgentMessages', () => {
   });
 
   it('keeps a prior sibling overlay when a matching policy-only submission fails', async () => {
-    // approval-1 already has a successful overlay while still pending in the fold
-    // (server has not yet dropped it). A failed policy send for approval-2 must
-    // not clear approval-1 just because it matches the same policy target.
+    // approval-1 already has a deny overlay while still pending in the fold
+    // (server has not yet dropped it). A failed policy send for approval-2
+    // overwrites matching siblings to `{ approved: true }` and must restore
+    // the prior deny+reason — not leave the optimistic allow.
     const seeded = replaceSessionSnapshot(snapshotWithMcpApprovals(['approval-1', 'approval-2']), {
       requiredActions: {
-        approvals: new Map([['approval-1', { approved: true }]]),
+        approvals: new Map([['approval-1', { approved: false, reason: 'blocked by user' }]]),
         toolResponses: new Map(),
       },
     });
@@ -1753,7 +1754,7 @@ describe('useTrueForgeAgentMessages', () => {
     const approval2 = assistant.content.find(part => part.type === 'tool-call' && part.toolCallId === 'approval-2');
     expect(approval1).toMatchObject({
       type: 'tool-call',
-      approval: { id: 'approval-1', approved: true },
+      approval: { id: 'approval-1', approved: false, reason: 'blocked by user' },
     });
     expect(approval2).toMatchObject({
       type: 'tool-call',
