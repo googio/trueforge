@@ -1,5 +1,11 @@
 # @truefoundry/trueforge
 
+## 0.179.2
+
+### Patch Changes
+
+- 198a2ea: Expose Prometheus request metrics at `GET /metrics` so a scraper can see rate, status, and latency for `/api` requests.
+
 ## 0.179.1
 
 ### Patch Changes
