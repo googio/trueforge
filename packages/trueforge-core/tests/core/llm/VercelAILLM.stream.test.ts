@@ -13,7 +13,9 @@ import type {
 import { APICallError } from 'ai';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
 import {
+  bodyTimeoutLogFields,
   describeStreamError,
+  isBodyTimeoutError,
   mapFinishReason,
   mapStreamToChunks,
   normalizeUsage,
@@ -678,5 +680,44 @@ describe('mapStreamToChunks', () => {
     // Only the finish-step chunk is emitted (no text-delta chunks for structural parts).
     const nonFinishChunks = chunks.filter(c => c.choices[0]?.finish_reason === null);
     expect(nonFinishChunks).toHaveLength(0);
+  });
+});
+
+// ─────────── Body Timeout correlation ───────────
+
+describe('isBodyTimeoutError / bodyTimeoutLogFields', () => {
+  it('detects nested undici Body Timeout causes', () => {
+    const error = new TypeError('fetch failed', {
+      cause: new Error('Body Timeout Error', { cause: { code: 'UND_ERR_BODY_TIMEOUT' } }),
+    });
+    expect(isBodyTimeoutError(error)).toBe(true);
+    expect(isBodyTimeoutError(new Error('Headers Timeout Error'))).toBe(false);
+  });
+
+  it('includes tfy_request_id, model, and gateway_url for gateway correlation', () => {
+    const error = new Error('Body Timeout Error');
+    expect(
+      bodyTimeoutLogFields({
+        error,
+        tfyRequestId: 'req-abc',
+        model: 'truefoundry/acct/gpt',
+        gatewayUrl: 'https://gateway.example/v1',
+      }),
+    ).toMatchObject({
+      error: 'Body Timeout Error',
+      tfy_request_id: 'req-abc',
+      model: 'truefoundry/acct/gpt',
+      gateway_url: 'https://gateway.example/v1',
+    });
+  });
+
+  it('omits gateway_url when the provider has no base URL', () => {
+    const fields = bodyTimeoutLogFields({
+      error: new Error('Body Timeout Error'),
+      tfyRequestId: 'req-abc',
+      model: 'openai/gpt',
+      gatewayUrl: undefined,
+    });
+    expect(fields).not.toHaveProperty('gateway_url');
   });
 });

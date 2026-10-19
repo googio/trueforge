@@ -27,6 +27,7 @@ import type {
   UserContent,
 } from 'ai';
 import { APICallError, jsonSchema, Output, streamText } from 'ai';
+import { randomUUID } from 'node:crypto';
 import type {
   ChatCompletionContentPart,
   ChatCompletionCreateParamsStreaming,
@@ -34,17 +35,20 @@ import type {
   ChatCompletionTool,
 } from 'openai/resources/chat';
 import type { Logger } from 'winston';
-import { describeUnknownError, extractErrorLogFields } from '../util/errorLogFields';
+import { describeUnknownError, extractErrorLogFields, type ErrorLogFields } from '../util/errorLogFields';
 import { modelSsrfFetch } from '../util/outboundFetch';
 import type { ILLM, LLMCreateParams, LLMCreateParamsStreaming } from './ILLM';
 import {
+  getEmptyUsage,
   type CompletionUsage,
   type ExtendedChatCompletionChunk,
-  getEmptyUsage,
   type RawAssistantMessage,
   type RawAssistantMessageWithUsage,
   type ThinkingBlock,
 } from './LLMTypes';
+
+/** Correlates harness model calls with TrueFoundry AI Gateway request traces. */
+export const X_TFY_REQUEST_ID = 'x-tfy-request-id';
 
 // ---------------------------------------------------------------------------
 // Public config
@@ -1380,6 +1384,27 @@ export async function* mapStreamToChunks({
 // VercelAILLM
 // ---------------------------------------------------------------------------
 
+/** True when undici idle-between-chunks bodyTimeout fired (nested under fetch failures). */
+export function isBodyTimeoutError(error: unknown): boolean {
+  return extractErrorLogFields(error).error.includes('Body Timeout');
+}
+
+/** Fields for Body Timeout logs: gateway correlation id plus model and URL when known. */
+export function bodyTimeoutLogFields(input: {
+  error: unknown;
+  tfyRequestId: string;
+  model: string;
+  gatewayUrl: string | undefined;
+}): ErrorLogFields & { tfy_request_id: string; model: string; gateway_url?: string } {
+  const fields = extractErrorLogFields(input.error);
+  return {
+    ...fields,
+    tfy_request_id: input.tfyRequestId,
+    model: input.model,
+    ...(input.gatewayUrl !== undefined ? { gateway_url: input.gatewayUrl } : {}),
+  };
+}
+
 /** ILLM implementation backed by Vercel AI SDK, supporting multiple LLM providers. */
 export class VercelAILLM implements ILLM {
   private readonly config: VercelAILLMConfig;
@@ -1395,7 +1420,15 @@ export class VercelAILLM implements ILLM {
   async *create(
     body: LLMCreateParamsStreaming,
   ): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
-    const { providerConfig } = this.config;
+    // Per-call id on x-tfy-request-id so Body Timeout (and gateway traces) can be correlated.
+    const tfyRequestId = randomUUID();
+    const providerConfig: VercelAIProviderConfig = {
+      ...this.config.providerConfig,
+      headers: {
+        ...this.config.providerConfig.headers,
+        [X_TFY_REQUEST_ID]: tfyRequestId,
+      },
+    };
     const languageModel = buildLanguageModel(providerConfig);
     const { provider, model } = providerConfig;
 
@@ -1451,6 +1484,16 @@ export class VercelAILLM implements ILLM {
     } catch (error) {
       if (this.signal?.aborted) {
         this.logger.debug('LLM call aborted', extractErrorLogFields(error));
+      } else if (isBodyTimeoutError(error)) {
+        this.logger.error(
+          'LLM Body Timeout',
+          bodyTimeoutLogFields({
+            error,
+            tfyRequestId,
+            model: providerConfig.name,
+            gatewayUrl: providerConfig.baseUrl,
+          }),
+        );
       } else {
         this.logger.error('Error creating streaming chat completion', extractErrorLogFields(error));
       }
@@ -1489,6 +1532,16 @@ export class VercelAILLM implements ILLM {
     } catch (error) {
       if (this.signal?.aborted) {
         this.logger.debug('LLM stream aborted', extractErrorLogFields(error));
+      } else if (isBodyTimeoutError(error)) {
+        this.logger.error(
+          'LLM Body Timeout',
+          bodyTimeoutLogFields({
+            error,
+            tfyRequestId,
+            model: providerConfig.name,
+            gatewayUrl: providerConfig.baseUrl,
+          }),
+        );
       } else {
         this.logger.error('Error reading LLM stream', extractErrorLogFields(error));
       }
