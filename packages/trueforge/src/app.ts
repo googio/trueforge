@@ -26,6 +26,7 @@ import { createInternalSessionsRouter, createSessionsRouter } from './apis/sessi
 import { createSettingsRouter } from './apis/settings';
 import { createAvailableSkillsRouter } from './apis/skills';
 import { createTurnsRouter } from './apis/turns';
+import { createZombieTurnsRouter } from './apis/zombieTurns';
 import type { Authenticator } from './auth/authenticator';
 import type { Authorizer } from './auth/authorizer';
 import { resolveRequestContext } from './auth/identity';
@@ -486,6 +487,19 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createSandboxEnvironmentBuildRouter({
         sandboxEnvironmentStore: deps.sandboxEnvironmentStore,
         sandboxProviderStore: deps.sandboxProviderStore,
+        logger: deps.logger,
+      }),
+      scheduleExecutionAuthMiddleware,
+    ),
+  );
+  app.route(
+    '/api/internal/turns',
+    withAuth(
+      createZombieTurnsRouter({
+        sessionStore: deps.sessionStore,
+        sessions: deps.sessions,
+        activeTurns: deps.activeTurns,
+        redis: deps.redis,
         logger: deps.logger,
       }),
       scheduleExecutionAuthMiddleware,

@@ -861,6 +861,32 @@
         ],
         "type": "object"
       },
+      "CloseZombieTurnRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "description": "Session that owns the turn.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "tenant_id": {
+            "description": "Tenant that owns the session.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "turn_id": {
+            "description": "Turn to close.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "session_id",
+          "turn_id"
+        ],
+        "type": "object"
+      },
       "CompactionConfig": {
         "additionalProperties": false,
         "default": {
@@ -2232,6 +2258,21 @@
         "required": [
           "data",
           "pagination"
+        ],
+        "type": "object"
+      },
+      "ListZombieTurnsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ZombieTurn"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
         ],
         "type": "object"
       },
@@ -6210,6 +6251,32 @@
           "type"
         ],
         "type": "object"
+      },
+      "ZombieTurn": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "description": "Session that owns the turn.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "tenant_id": {
+            "description": "Tenant that owns the session.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "turn_id": {
+            "description": "Running turn with stale last activity.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "session_id",
+          "turn_id"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -6698,6 +6765,93 @@
           "sessions"
         ],
         "x-fern-sdk-method-name": "get_or_create_by_external_id"
+      }
+    },
+    "/api/internal/turns/close-zombie": {
+      "post": {
+        "description": "Cancels a zombie turn (turn.done with abandoned reason).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseZombieTurnRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Closed (or already terminal / missing turn)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid service credential."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Session not found."
+          }
+        },
+        "summary": "Close a stale running turn",
+        "tags": [
+          "Internal"
+        ],
+        "x-excluded": true,
+        "x-fern-sdk-group-name": [
+          "internal",
+          "turns"
+        ],
+        "x-fern-sdk-method-name": "close_zombie"
+      }
+    },
+    "/api/internal/turns/zombie": {
+      "get": {
+        "description": "Returns all running turns with no events for 15+ minutes.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListZombieTurnsResponse"
+                }
+              }
+            },
+            "description": "Stale running turns oldest-first."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid service credential."
+          }
+        },
+        "summary": "List stale running turns",
+        "tags": [
+          "Internal"
+        ],
+        "x-excluded": true,
+        "x-fern-sdk-group-name": [
+          "internal",
+          "turns"
+        ],
+        "x-fern-sdk-method-name": "list_zombie"
       }
     },
     "/api/v1/agents": {

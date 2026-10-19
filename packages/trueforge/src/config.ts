@@ -826,6 +826,21 @@ export interface SharedServerConfiguration {
    */
   SERVER_URL: string;
   /**
+   * Running turns with last activity older than this are zombies (list/close API).
+   * Env: `ZOMBIE_TURN_STALE_MS`. Default 900000 (15 minutes).
+   */
+  ZOMBIE_TURN_STALE_MS: number;
+  /**
+   * Max zombie turns the controller closes per tick.
+   * Env: `ZOMBIE_TURN_CLOSE_BATCH`. Default 50.
+   */
+  ZOMBIE_TURN_CLOSE_BATCH: number;
+  /**
+   * Gap between zombie-turn closer loop passes.
+   * Env: `ZOMBIE_TURN_CLOSER_INTERVAL_MS`. Default 60000.
+   */
+  ZOMBIE_TURN_CLOSER_INTERVAL_MS: number;
+  /**
    * Service credential for controller calls.
    * Env: `TRUEFORGE_API_KEY`. Required and non-empty when `STANDALONE=false`.
    * Standalone defaults to {@link STANDALONE_TRUEFORGE_API_KEY} (local testing only).
@@ -1199,6 +1214,21 @@ const shared: SharedServerConfiguration = {
   PUBLIC_BASE_URL: parsePublicBaseUrl(getEnv('PUBLIC_BASE_URL', { defaultValue: '' })),
   SERVER_URL:
     getEnv('SERVER_URL', { defaultValue: `http://localhost:${String(port)}` }) ?? `http://localhost:${String(port)}`,
+  ZOMBIE_TURN_STALE_MS: parsePositiveInt({
+    envKey: 'ZOMBIE_TURN_STALE_MS',
+    raw: getEnv('ZOMBIE_TURN_STALE_MS'),
+    defaultValue: 15 * 60_000,
+  }),
+  ZOMBIE_TURN_CLOSE_BATCH: parsePositiveInt({
+    envKey: 'ZOMBIE_TURN_CLOSE_BATCH',
+    raw: getEnv('ZOMBIE_TURN_CLOSE_BATCH'),
+    defaultValue: 50,
+  }),
+  ZOMBIE_TURN_CLOSER_INTERVAL_MS: parsePositiveInt({
+    envKey: 'ZOMBIE_TURN_CLOSER_INTERVAL_MS',
+    raw: getEnv('ZOMBIE_TURN_CLOSER_INTERVAL_MS'),
+    defaultValue: 60_000,
+  }),
   TRUEFORGE_API_KEY: standalone
     ? (getEnv('TRUEFORGE_API_KEY', { defaultValue: STANDALONE_TRUEFORGE_API_KEY }) ?? STANDALONE_TRUEFORGE_API_KEY)
     : (getEnv('TRUEFORGE_API_KEY', { required: true }) ?? ''),

@@ -3705,6 +3705,129 @@ await client.internal.sessions.getOrCreateByExternalId({
 </dl>
 </details>
 
+## Internal Turns
+<details><summary><code>client.internal.turns.<a href="/src/api/resources/internal/resources/turns/client/Client.ts">closeZombie</a>({ ...params }) -> void</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Cancels a zombie turn (turn.done with abandoned reason).
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.internal.turns.closeZombie({
+    sessionId: "session_id",
+    tenantId: "tenant_id",
+    turnId: "turn_id"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.internal.CloseZombieTurnRequest` 
+    
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TurnsClient.RequestOptions` 
+    
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.internal.turns.<a href="/src/api/resources/internal/resources/turns/client/Client.ts">listZombie</a>() -> TrueForge.ListZombieTurnsResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Returns all running turns with no events for 15+ minutes.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.internal.turns.listZombie();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `TurnsClient.RequestOptions` 
+    
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Internal Agents
 <details><summary><code>client.internal.agents.<a href="/src/api/resources/internal/resources/agents/client/Client.ts">getCodeSnippets</a>(agent_id, { ...params }) -> TrueForge.GetAgentCodeSnippetsResponse</code></summary>
 <dl>

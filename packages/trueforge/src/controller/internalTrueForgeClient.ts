@@ -35,4 +35,21 @@ export const internalTrueForgeClient = {
   async progressSandboxEnvironmentVersion(environmentVersionId: string): Promise<void> {
     await client.internal.sandboxEnvironments.progress({ environmentVersionId });
   },
+
+  async listZombieTurns(): Promise<{ tenantId: string; sessionId: string; turnId: string }[]> {
+    const response = await client.internal.turns.listZombie();
+    return response.data.map(row => ({
+      tenantId: row.tenantId,
+      sessionId: row.sessionId,
+      turnId: row.turnId,
+    }));
+  },
+
+  async closeZombieTurn(input: { tenantId: string; sessionId: string; turnId: string }): Promise<void> {
+    await client.internal.turns.closeZombie({
+      tenantId: input.tenantId,
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+    });
+  },
 };
