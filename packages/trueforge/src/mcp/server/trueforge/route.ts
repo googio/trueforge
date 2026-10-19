@@ -17,15 +17,7 @@ export const X_TFG_TRUEFORGE_MCP = 'x-tfg-trueforge-mcp';
 
 const baseUrl = normalizeTlsUrl({ url: configuration.SERVER_URL, enabled: configuration.MTLS_ENABLED });
 const internalFetch = internalTlsFetch(configuration);
-
-function withTrueForgeMcpHeader(fetchFn: typeof globalThis.fetch): typeof globalThis.fetch {
-  return (input, init) => {
-    const headers = new Headers(input instanceof Request ? input.headers : undefined);
-    new Headers(init?.headers).forEach((value, name) => headers.set(name, value));
-    headers.set(X_TFG_TRUEFORGE_MCP, 'true');
-    return fetchFn(input, { ...init, headers, redirect: 'manual' });
-  };
-}
+const trueForgeMcpUrl = new URL('/mcp', baseUrl).href;
 
 export function requireTrueForgeMcpHeader(raw: string | undefined): void {
   if (raw === undefined) {
@@ -46,10 +38,15 @@ function createTrueForgeSDKClient(input: { userCredential: string | null }): Tru
   });
 }
 
-/** Canonical self-origin MCP connection with its marked, mTLS-aware fetch. */
-export const trueForgeMcpConnection = {
-  url: new URL('/mcp', baseUrl).href,
-  fetch: withTrueForgeMcpHeader(internalFetch),
+/** Canonical self-origin MCP endpoint with its marker header and trusted mTLS-aware network policy. */
+export const trueForgeMcpEndpoint = {
+  url: trueForgeMcpUrl,
+  headers: { [X_TFG_TRUEFORGE_MCP]: 'true' },
+  networkPolicy: {
+    type: 'trusted-internal' as const,
+    endpoint: trueForgeMcpUrl,
+    fetch: internalFetch,
+  },
 };
 
 export interface TrueForgeMcpRouterDeps {

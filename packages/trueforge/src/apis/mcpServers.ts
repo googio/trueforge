@@ -36,7 +36,7 @@ import {
   putMcpServerRoute,
 } from '../routes/mcpServerRoutes';
 import { findCatalogUsageConflict } from '../runtime/catalogUsage';
-import { createMcpConnectionProvider } from '../runtime/sessionResources';
+import { getMcpConnection } from '../runtime/sessionResources';
 import type {
   AvailableMcpServer,
   ConfiguredMcpServer,
@@ -466,15 +466,13 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
     const { name } = c.req.valid('param');
     const requestContext = deps.resolveRequestContext(c);
     const userRef = requestContext.subject.id;
-    const mcpConnectionProvider = createMcpConnectionProvider({
-      store: deps.resolveMcpServerStore(c),
-      requestContext,
-    });
     // Same url + header resolution as turn execution (store Bearer, DCR, or static headers).
-    const connection = await mcpConnectionProvider.getConnection({
+    const connection = await getMcpConnection({
       tenant_id: requestContext.tenant_id,
       name,
+      store: deps.resolveMcpServerStore(c),
       userRef,
+      requestContext,
     });
     if (connection === undefined) {
       return c.json({ error: { message: `MCP server not found: ${name}` } }, 404);
@@ -483,9 +481,7 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
       id: name,
       name,
       description: connection.description,
-      url: connection.url,
-      headers: connection.headers ?? {},
-      ...(connection.fetch === undefined ? {} : { fetch: connection.fetch }),
+      endpoint: connection,
       requestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       connectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
       maxResponseBytes: configuration.MCP_TOOL_CALL_MAX_RESPONSE_BYTES,

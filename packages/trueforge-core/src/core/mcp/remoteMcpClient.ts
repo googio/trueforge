@@ -15,6 +15,13 @@ import type { ToolSchema } from './IMCPServer';
 
 export type RemoteMcpTransportType = 'streamable-http' | 'sse';
 export type RemoteMcpFetch = FetchLike;
+export type RemoteMcpNetworkPolicy =
+  | { type: 'external' }
+  | {
+      type: 'trusted-internal';
+      endpoint: string;
+      fetch: RemoteMcpFetch;
+    };
 
 export interface RemoteMcpConnection {
   readonly transportType: RemoteMcpTransportType;
@@ -60,6 +67,31 @@ export function withMaxResponseBytes(fetchFn: FetchLike, maxBytes: number): Fetc
       ),
       { status: response.status, statusText: response.statusText, headers: response.headers },
     );
+  };
+}
+
+function fetchInputUrl(input: Parameters<RemoteMcpFetch>[0]): URL {
+  return new URL(input);
+}
+
+/** Select the transport fetch while keeping internal trust exact-endpoint scoped. */
+export function fetchForMcpNetworkPolicy(params: { url: URL; policy?: RemoteMcpNetworkPolicy }): RemoteMcpFetch {
+  const policy = params.policy;
+  if (policy === undefined || policy.type === 'external') {
+    return mcpSsrfFetch;
+  }
+
+  const trustedEndpoint = new URL(policy.endpoint);
+  if (params.url.href !== trustedEndpoint.href) {
+    throw new Error(`Trusted MCP policy endpoint does not match connection URL: ${params.url.href}`);
+  }
+
+  return (input, init) => {
+    const requestUrl = fetchInputUrl(input);
+    if (requestUrl.href !== trustedEndpoint.href) {
+      throw new Error(`Trusted MCP fetch attempted an unexpected URL: ${requestUrl.href}`);
+    }
+    return policy.fetch(input, { ...init, redirect: 'manual' });
   };
 }
 
@@ -178,7 +210,7 @@ function buildConnection(
 export async function connectRemoteMcp(params: {
   url: string;
   headers: Record<string, string>;
-  fetch?: RemoteMcpFetch;
+  networkPolicy?: RemoteMcpNetworkPolicy;
   sessionId?: string | undefined;
   knownTransportType?: RemoteMcpTransportType | undefined;
   requestTimeoutMs: number;
@@ -191,7 +223,10 @@ export async function connectRemoteMcp(params: {
   const url = new URL(params.url);
   const requestOptions = { signal: params.signal };
   const fetchFn = withMaxResponseBytes(
-    params.fetch ?? mcpSsrfFetch,
+    fetchForMcpNetworkPolicy({
+      url,
+      ...(params.networkPolicy === undefined ? {} : { policy: params.networkPolicy }),
+    }),
     params.maxResponseBytes ?? DEFAULT_MAX_MCP_RESPONSE_BYTES,
   );
   const candidates = params.knownTransportType

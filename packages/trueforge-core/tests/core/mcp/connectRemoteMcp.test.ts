@@ -1,5 +1,5 @@
 import { McpConnectionError } from '../../../src/core/errors';
-import { connectRemoteMcp } from '../../../src/core/mcp/remoteMcpClient';
+import { connectRemoteMcp, fetchForMcpNetworkPolicy, type RemoteMcpFetch } from '../../../src/core/mcp/remoteMcpClient';
 
 // Records every transport type client.connect() was attempted with, in order.
 const mockConnectAttempts: string[] = [];
@@ -83,6 +83,36 @@ const baseParams = () => ({
   requestTimeoutMs: 60_000,
   connectTimeoutMs: 5_000,
   signal: new AbortController().signal,
+});
+
+describe('fetchForMcpNetworkPolicy', () => {
+  const endpoint = 'https://trueforge.internal/mcp';
+
+  it('allows only the exact trusted endpoint and disables redirects', async () => {
+    const fetch = jest.fn(async () => new Response(null, { status: 200 })) as unknown as RemoteMcpFetch;
+    const trustedFetch = fetchForMcpNetworkPolicy({
+      url: new URL(endpoint),
+      policy: { type: 'trusted-internal', endpoint, fetch },
+    });
+
+    await trustedFetch(endpoint, { redirect: 'follow' });
+
+    expect(fetch).toHaveBeenCalledWith(endpoint, expect.objectContaining({ redirect: 'manual' }));
+    expect(() => trustedFetch('https://trueforge.internal/other')).toThrow(
+      'Trusted MCP fetch attempted an unexpected URL',
+    );
+  });
+
+  it('rejects a trusted policy whose endpoint differs from the connection URL', () => {
+    const fetch = jest.fn() as unknown as RemoteMcpFetch;
+
+    expect(() =>
+      fetchForMcpNetworkPolicy({
+        url: new URL(endpoint),
+        policy: { type: 'trusted-internal', endpoint: 'https://other.internal/mcp', fetch },
+      }),
+    ).toThrow('Trusted MCP policy endpoint does not match connection URL');
+  });
 });
 
 describe('connectRemoteMcp transport selection', () => {

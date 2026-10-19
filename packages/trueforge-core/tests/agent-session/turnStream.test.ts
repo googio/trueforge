@@ -449,8 +449,10 @@ describe('TurnResourceResolver caches', () => {
             id: 'svc',
             name: 'svc',
             description: 'Example MCP server.',
-            url: 'http://example.invalid',
-            headers: {},
+            endpoint: {
+              url: 'http://example.invalid',
+              headers: {},
+            },
             logger,
             tracing: this.createTracing(),
             requestTimeoutMs: 60_000,

@@ -57,7 +57,6 @@ import {
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { minIntervalSeconds, nextTriggerAfter } from '../runtime/cron';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
-import { createMcpConnectionProvider } from '../runtime/sessionResources';
 import {
   InvalidCronError,
   SCHEDULE_MIN_INTERVAL_SECONDS,
@@ -121,9 +120,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       eventSubscriptions: deps.eventSubscriptions,
       agentStore: deps.agentStore,
       modelProviderStore: deps.resolveModelProviderStore({ c, runAsAgent: prepared.agent }),
-      mcpConnectionProvider: createMcpConnectionProvider({
-        store: deps.resolveMcpServerStore({ c, runAsAgent: prepared.agent }),
-      }),
+      mcpServerStore: deps.resolveMcpServerStore({ c, runAsAgent: prepared.agent }),
       sandboxProviderStore: deps.resolveSandboxProviderStore(c),
       sandboxEnvironmentStore: deps.sandboxEnvironmentStore,
       webSearchProviderStore: deps.resolveWebSearchProviderStore(c),

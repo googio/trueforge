@@ -36,7 +36,7 @@ import { streamSSE } from 'hono/streaming';
 import type { Logger } from 'winston';
 import type { ResolveMcpServerStoreInput, ResolveModelProviderStoreInput, ResolveTurnSkillsStoreInput } from '../app';
 import type { Authorizer } from '../auth/authorizer';
-import type { ResolveRequestContext } from '../auth/identity';
+import type { RequestContext, ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
@@ -61,11 +61,10 @@ import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry
 import { validateSandboxFilePath } from '../runtime/sandboxFilePath';
 import {
   buildTurnSandbox,
-  createMcpConnectionProvider,
+  getMcpConnection,
   getModelDetails,
   resolveSandboxEnvironment,
   resolveSandboxProvider,
-  type IMcpConnectionProvider,
 } from '../runtime/sessionResources';
 import { DEFAULT_SANDBOX_ENVIRONMENT_NAME } from '../schemas/sandboxEnvironment';
 import { MAX_SESSION_TITLE_LENGTH } from '../schemas/session';
@@ -145,7 +144,8 @@ export type BeginTurnExecutionDeps = Pick<
 > & {
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
-  mcpConnectionProvider: IMcpConnectionProvider;
+  mcpServerStore: IMcpServerWithAuthStore;
+  requestContext?: RequestContext;
   sandboxProviderStore: ISandboxProviderStore;
   webSearchProviderStore: IWebSearchProviderStore;
   skillStore: Pick<ISkillStore, 'resolveTurnSkills'>;
@@ -166,7 +166,8 @@ interface BeginTurnExecutionParams {
  * the same way: async factories over the corresponding stores.
  */
 function createTurnResolver(deps: {
-  mcpConnectionProvider: IMcpConnectionProvider;
+  mcpServerStore: IMcpServerWithAuthStore;
+  requestContext?: RequestContext;
   skillStore: Pick<ISkillStore, 'resolveTurnSkills'>;
   sandboxProviderStore: ISandboxProviderStore;
   sandboxEnvironmentStore: ISandboxEnvironmentStore;
@@ -180,7 +181,8 @@ function createTurnResolver(deps: {
   turnMetadata: TurnMetadata;
 }): TurnResourceResolver {
   const {
-    mcpConnectionProvider,
+    mcpServerStore,
+    requestContext,
     skillStore,
     sandboxProviderStore,
     sandboxEnvironmentStore,
@@ -215,11 +217,13 @@ function createTurnResolver(deps: {
       };
     },
     mcp: async name => {
-      const connection = await mcpConnectionProvider.getConnection({
+      const connection = await getMcpConnection({
         tenant_id,
         name,
+        store: mcpServerStore,
         userRef,
         turnMetadata,
+        ...(requestContext === undefined ? {} : { requestContext }),
       });
       if (connection === undefined) {
         throw new HTTPException(422, {
@@ -444,7 +448,8 @@ export async function beginTurnExecution(
     store: deps.webSearchProviderStore,
   });
   const resolver = createTurnResolver({
-    mcpConnectionProvider: deps.mcpConnectionProvider,
+    mcpServerStore: deps.mcpServerStore,
+    ...(deps.requestContext === undefined ? {} : { requestContext: deps.requestContext }),
     skillStore: deps.skillStore,
     sandboxProviderStore: deps.sandboxProviderStore,
     sandboxEnvironmentStore: deps.sandboxEnvironmentStore,
@@ -828,14 +833,12 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           allowInlineResources,
           ...(referencedAgent !== undefined ? { runAsAgent: referencedAgent } : {}),
         }),
-        mcpConnectionProvider: createMcpConnectionProvider({
-          store: deps.resolveMcpServerStore({
-            c,
-            allowInlineResources,
-            ...(referencedAgent !== undefined ? { runAsAgent: referencedAgent } : {}),
-          }),
-          requestContext,
+        mcpServerStore: deps.resolveMcpServerStore({
+          c,
+          allowInlineResources,
+          ...(referencedAgent !== undefined ? { runAsAgent: referencedAgent } : {}),
         }),
+        requestContext,
         skillStore: deps.resolveTurnSkillsStore({ c, allowInlineResources }),
         agentStore: deps.resolveAgentStore(c),
         sandboxProviderStore: deps.resolveSandboxProviderStore(c),

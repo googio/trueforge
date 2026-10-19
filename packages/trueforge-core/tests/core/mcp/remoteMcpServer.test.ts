@@ -133,9 +133,19 @@ function makeServer(params: {
     name: 'my-inline',
     id: 'inline-id-123',
     description: 'my-inline MCP server',
-    url: 'https://mcp.example.com/mcp',
-    headers: params.headers ?? {},
-    ...(params.fetch === undefined ? {} : { fetch: params.fetch }),
+    endpoint: {
+      url: 'https://mcp.example.com/mcp',
+      headers: params.headers ?? {},
+      ...(params.fetch === undefined
+        ? {}
+        : {
+            networkPolicy: {
+              type: 'trusted-internal' as const,
+              endpoint: 'https://mcp.example.com/mcp',
+              fetch: params.fetch,
+            },
+          }),
+    },
     logger: noopLogger,
     tracing: NOOP_AGENT_TRACING,
     sessionId: params.sessionId,
@@ -153,14 +163,22 @@ function makeServer(params: {
 }
 
 describe('RemoteMCP + ToolSet', () => {
-  it('passes a connection-specific fetch to the MCP transport', async () => {
+  it('passes a connection-specific network policy to the MCP transport', async () => {
     installFakeConnection();
     const fetch = jest.fn() as unknown as RemoteMcpFetch;
     const server = makeServer({ fetch });
 
     await server.listTools();
 
-    expect(mockConnect).toHaveBeenCalledWith(expect.objectContaining({ fetch }));
+    expect(mockConnect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        networkPolicy: {
+          type: 'trusted-internal',
+          endpoint: 'https://mcp.example.com/mcp',
+          fetch,
+        },
+      }),
+    );
   });
 
   it('connects once, emits init info with session id, and caches across listTools calls', async () => {

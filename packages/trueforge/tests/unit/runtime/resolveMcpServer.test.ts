@@ -7,7 +7,8 @@ import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { mcpOAuthCallbackUrl } from '../../../src/mcp/auth/mcpOAuthHelpers';
-import { createMcpConnectionProvider, resolveMcpServer } from '../../../src/runtime/sessionResources';
+import { X_TFG_TRUEFORGE_MCP } from '../../../src/mcp/server/trueforge/route';
+import { getMcpConnection } from '../../../src/runtime/sessionResources';
 
 jest.mock('undici', () => {
   const actual = jest.requireActual<typeof import('undici')>('undici');
@@ -20,7 +21,7 @@ jest.mock('undici', () => {
   };
 });
 
-describe('resolveMcpServer', () => {
+describe('getMcpConnection', () => {
   let db: ReturnType<typeof createSqliteDb>;
   let mcpServerStore: IMcpServerWithAuthStore;
   let tokenStore: SqliteOAuthTokenStore;
@@ -96,7 +97,7 @@ describe('resolveMcpServer', () => {
         },
       });
 
-      const connection = await resolveMcpServer({
+      const connection = await getMcpConnection({
         tenant_id: 'default',
         name: 'oauth-mcp',
         store: mcpServerStore,
@@ -108,7 +109,6 @@ describe('resolveMcpServer', () => {
       }
 
       expect(connection.url).toBe(mcpUrl);
-      expect(connection.description).toBe('OAuth MCP server.');
       expect(typeof connection.headers).toBe('function');
       if (typeof connection.headers !== 'function') {
         throw new Error('expected async headers resolver');
@@ -155,7 +155,7 @@ describe('resolveMcpServer', () => {
       },
     });
 
-    const connection = await resolveMcpServer({
+    const connection = await getMcpConnection({
       tenant_id: 'default',
       name: 'tokened-mcp',
       store: mcpServerStore,
@@ -182,7 +182,7 @@ describe('resolveMcpServer', () => {
       },
     });
 
-    const connection = await resolveMcpServer({
+    const connection = await getMcpConnection({
       tenant_id: 'default',
       name: 'open-mcp',
       store: mcpServerStore,
@@ -199,33 +199,36 @@ describe('resolveMcpServer', () => {
   });
 
   it('resolves the built-in trueforge MCP without a stored server', async () => {
-    const provider = createMcpConnectionProvider({
+    const connection = await getMcpConnection({
+      tenant_id: 'default',
+      name: 'trueforge',
       store: mcpServerStore,
+      userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
       requestContext: {
         ...STANDALONE_REQUEST_CONTEXT,
         user_credential: 'draft-token',
       },
     });
-    const connection = await provider.getConnection({
-      tenant_id: 'default',
-      name: 'trueforge',
-      userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
-    });
 
     expect(connection?.url).toMatch(/\/mcp$/);
-    expect(connection?.headers).toEqual({ Authorization: 'Bearer draft-token' });
-    expect(connection?.fetch).toEqual(expect.any(Function));
+    expect(connection?.description).toBe('Manage resources in this TrueForge deployment.');
+    expect(connection?.headers).toEqual({
+      Authorization: 'Bearer draft-token',
+      [X_TFG_TRUEFORGE_MCP]: 'true',
+    });
+    expect(connection?.networkPolicy).toEqual({
+      type: 'trusted-internal',
+      endpoint: connection?.url,
+      fetch: expect.any(Function),
+    });
   });
 
   it('does not resolve the built-in trueforge MCP without a request context', async () => {
-    const provider = createMcpConnectionProvider({
-      store: mcpServerStore,
-    });
-
     await expect(
-      provider.getConnection({
+      getMcpConnection({
         tenant_id: 'default',
         name: 'trueforge',
+        store: mcpServerStore,
         userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
       }),
     ).resolves.toBeUndefined();
@@ -244,7 +247,7 @@ describe('resolveMcpServer', () => {
       },
     });
 
-    const connection = await resolveMcpServer({
+    const connection = await getMcpConnection({
       tenant_id: 'default',
       name: 'header-mcp',
       store: mcpServerStore,
@@ -284,7 +287,7 @@ describe('resolveMcpServer', () => {
         },
       });
 
-      const connection = await resolveMcpServer({
+      const connection = await getMcpConnection({
         tenant_id: 'default',
         name: 'tfy-mcp',
         store,
@@ -303,7 +306,7 @@ describe('resolveMcpServer', () => {
 
   it('returns undefined when the server is not registered', async () => {
     await expect(
-      resolveMcpServer({
+      getMcpConnection({
         tenant_id: 'default',
         name: 'missing-mcp',
         store: mcpServerStore,

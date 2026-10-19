@@ -182,14 +182,12 @@ export class TurnResourceResolver<
         const source = await this.getOrCreateToolSource({
           id: entry.name,
           create: async () => {
-            const { url, description, headers, fetch } = await this.deps.mcp(entry.name);
+            const resolved = await this.deps.mcp(entry.name);
             return new RemoteMCP({
               id: entry.name,
               name: entry.name,
-              url,
-              headers: headers ?? {},
-              description,
-              ...(fetch === undefined ? {} : { fetch }),
+              description: resolved.description,
+              endpoint: resolved,
               sessionId: previousTurn?.snapshot.mcp_servers?.[entry.name]?.session_id,
               requestTimeoutMs: this.deps.mcpRequestTimeoutMs,
               connectTimeoutMs: this.deps.mcpConnectTimeoutMs,

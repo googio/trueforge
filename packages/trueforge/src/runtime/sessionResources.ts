@@ -23,7 +23,7 @@ import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { ISkillStore } from '../db/skillStore';
 import type { TurnMetadata } from '../db/turnMetadata';
 import type { IWebSearchProviderStore } from '../db/webSearchProviderStore';
-import { trueForgeMcpConnection } from '../mcp/server/trueforge/route';
+import { trueForgeMcpEndpoint } from '../mcp/server/trueforge/route';
 import { TRUEFORGE_CONNECTOR_NAME } from '../mcp/server/trueforge/server';
 import { LocalSandboxProvider } from '../sandbox/local/provider/LocalSandboxProvider';
 import { getCachedLocalSandboxSupport, isLocalSandboxFallbackEnabled } from '../sandbox/localRuntime';
@@ -39,40 +39,10 @@ import { hasConfiguredWebSearchProvider } from '../websearch/providers';
 export interface GetMcpConnectionInput {
   tenant_id: string;
   name: string;
+  store: IMcpServerWithAuthStore;
   userRef: string;
   turnMetadata?: TurnMetadata;
-}
-
-export interface IMcpConnectionProvider {
-  getConnection(input: GetMcpConnectionInput): Promise<ResolvedMcpServer | undefined>;
-}
-
-/**
- * Request-scoped MCP connection provider. The built-in server is available only with a live request
- * context; its `null` credential is valid in standalone mode.
- */
-export function createMcpConnectionProvider(input: {
-  store: IMcpServerWithAuthStore;
   requestContext?: RequestContext;
-}): IMcpConnectionProvider {
-  return {
-    getConnection: async params => {
-      if (params.name === TRUEFORGE_CONNECTOR_NAME) {
-        if (input.requestContext === undefined) {
-          return undefined;
-        }
-        return {
-          ...trueForgeMcpConnection,
-          description: 'Manage resources in this TrueForge deployment.',
-          headers:
-            input.requestContext.user_credential === null
-              ? {}
-              : { Authorization: `Bearer ${input.requestContext.user_credential}` },
-        };
-      }
-      return resolveMcpServer({ ...params, store: input.store });
-    },
-  };
 }
 
 /** Split `provider/model` FQN. Returns undefined when the shape is not exactly one slash. */
@@ -153,19 +123,31 @@ export async function getModelDetails({
  *
  * TODO: OAuth header resolvers re-run on every RemoteMCP listTools/callTool; cache or gate later.
  */
-export async function resolveMcpServer({
+export async function getMcpConnection({
   tenant_id,
   name,
   store,
   userRef,
   turnMetadata,
-}: {
-  tenant_id: string;
-  name: string;
-  store: IMcpServerWithAuthStore;
-  userRef: string;
-  turnMetadata?: TurnMetadata;
-}): Promise<ResolvedMcpServer | undefined> {
+  requestContext,
+}: GetMcpConnectionInput): Promise<ResolvedMcpServer | undefined> {
+  if (name === TRUEFORGE_CONNECTOR_NAME) {
+    if (requestContext === undefined) {
+      return undefined;
+    }
+    return {
+      ...trueForgeMcpEndpoint,
+      description: 'Manage resources in this TrueForge deployment.',
+      headers:
+        requestContext.user_credential === null
+          ? trueForgeMcpEndpoint.headers
+          : {
+              ...trueForgeMcpEndpoint.headers,
+              Authorization: `Bearer ${requestContext.user_credential}`,
+            },
+    };
+  }
+
   const record = await store.getServer({ tenant_id, name });
   if (record === undefined) {
     return undefined;
