@@ -6,6 +6,7 @@ import typing
 from importlib import import_module
 
 if typing.TYPE_CHECKING:
+    from .abandoned_turn import AbandonedTurn
     from .action_required import ActionRequired
     from .action_required_event import ActionRequiredEvent
     from .agent import Agent
@@ -102,6 +103,7 @@ if typing.TYPE_CHECKING:
     from .initial_user_message import InitialUserMessage
     from .input_tokens_compaction_trigger import InputTokensCompactionTrigger
     from .large_tool_response_config import LargeToolResponseConfig
+    from .list_abandoned_turns_response import ListAbandonedTurnsResponse
     from .list_agents_response import ListAgentsResponse
     from .list_available_mcp_servers_response import ListAvailableMcpServersResponse
     from .list_available_models_response import ListAvailableModelsResponse
@@ -123,7 +125,6 @@ if typing.TYPE_CHECKING:
     from .list_turn_events_order import ListTurnEventsOrder
     from .list_turn_events_response import ListTurnEventsResponse
     from .list_turns_response import ListTurnsResponse
-    from .list_zombie_turns_response import ListZombieTurnsResponse
     from .mcp_auth_required_event import McpAuthRequiredEvent
     from .mcp_auth_status import McpAuthStatus
     from .mcp_auth_status_status import McpAuthStatusStatus
@@ -276,8 +277,8 @@ if typing.TYPE_CHECKING:
     from .web_search_config import WebSearchConfig
     from .web_search_provider_manifest import WebSearchProviderManifest
     from .zai_model_provider import ZaiModelProvider
-    from .zombie_turn import ZombieTurn
 _dynamic_imports: typing.Dict[str, str] = {
+    "AbandonedTurn": ".abandoned_turn",
     "ActionRequired": ".action_required",
     "ActionRequiredEvent": ".action_required_event",
     "Agent": ".agent",
@@ -374,6 +375,7 @@ _dynamic_imports: typing.Dict[str, str] = {
     "InitialUserMessage": ".initial_user_message",
     "InputTokensCompactionTrigger": ".input_tokens_compaction_trigger",
     "LargeToolResponseConfig": ".large_tool_response_config",
+    "ListAbandonedTurnsResponse": ".list_abandoned_turns_response",
     "ListAgentsResponse": ".list_agents_response",
     "ListAvailableMcpServersResponse": ".list_available_mcp_servers_response",
     "ListAvailableModelsResponse": ".list_available_models_response",
@@ -395,7 +397,6 @@ _dynamic_imports: typing.Dict[str, str] = {
     "ListTurnEventsOrder": ".list_turn_events_order",
     "ListTurnEventsResponse": ".list_turn_events_response",
     "ListTurnsResponse": ".list_turns_response",
-    "ListZombieTurnsResponse": ".list_zombie_turns_response",
     "McpAuthRequiredEvent": ".mcp_auth_required_event",
     "McpAuthStatus": ".mcp_auth_status",
     "McpAuthStatusStatus": ".mcp_auth_status_status",
@@ -548,7 +549,6 @@ _dynamic_imports: typing.Dict[str, str] = {
     "WebSearchConfig": ".web_search_config",
     "WebSearchProviderManifest": ".web_search_provider_manifest",
     "ZaiModelProvider": ".zai_model_provider",
-    "ZombieTurn": ".zombie_turn",
 }
 
 
@@ -574,6 +574,7 @@ def __dir__():
 
 
 __all__ = [
+    "AbandonedTurn",
     "ActionRequired",
     "ActionRequiredEvent",
     "Agent",
@@ -670,6 +671,7 @@ __all__ = [
     "InitialUserMessage",
     "InputTokensCompactionTrigger",
     "LargeToolResponseConfig",
+    "ListAbandonedTurnsResponse",
     "ListAgentsResponse",
     "ListAvailableMcpServersResponse",
     "ListAvailableModelsResponse",
@@ -691,7 +693,6 @@ __all__ = [
     "ListTurnEventsOrder",
     "ListTurnEventsResponse",
     "ListTurnsResponse",
-    "ListZombieTurnsResponse",
     "McpAuthRequiredEvent",
     "McpAuthStatus",
     "McpAuthStatusStatus",
@@ -844,5 +845,4 @@ __all__ = [
     "WebSearchConfig",
     "WebSearchProviderManifest",
     "ZaiModelProvider",
-    "ZombieTurn",
 ]

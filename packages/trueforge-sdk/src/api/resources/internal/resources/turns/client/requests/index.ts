@@ -1,1 +1,1 @@
-export type { CloseZombieTurnRequest } from "./CloseZombieTurnRequest.js";
+export type { CloseAbandonedTurnRequest } from "./CloseAbandonedTurnRequest.js";

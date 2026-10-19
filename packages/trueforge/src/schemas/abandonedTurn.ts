@@ -1,29 +1,29 @@
 /**
- * Wire schemas for internal zombie-turn closer endpoints.
+ * Wire schemas for internal abandoned-turn closer endpoints.
  */
 import { z } from '@hono/zod-openapi';
 
-export const ZombieTurnSchema = z
+export const AbandonedTurnSchema = z
   .object({
     tenant_id: z.string().min(1).describe('Tenant that owns the session.'),
     session_id: z.string().min(1).describe('Session that owns the turn.'),
     turn_id: z.string().min(1).describe('Running turn with stale last activity.'),
   })
   .strict()
-  .openapi('ZombieTurn');
+  .openapi('AbandonedTurn');
 
-export const ListZombieTurnsResponseSchema = z
+export const ListAbandonedTurnsResponseSchema = z
   .object({
-    data: z.array(ZombieTurnSchema),
+    data: z.array(AbandonedTurnSchema),
   })
   .strict()
-  .openapi('ListZombieTurnsResponse');
+  .openapi('ListAbandonedTurnsResponse');
 
-export const CloseZombieTurnRequestSchema = z
+export const CloseAbandonedTurnRequestSchema = z
   .object({
     tenant_id: z.string().min(1).describe('Tenant that owns the session.'),
     session_id: z.string().min(1).describe('Session that owns the turn.'),
     turn_id: z.string().min(1).describe('Turn to close.'),
   })
   .strict()
-  .openapi('CloseZombieTurnRequest');
+  .openapi('CloseAbandonedTurnRequest');

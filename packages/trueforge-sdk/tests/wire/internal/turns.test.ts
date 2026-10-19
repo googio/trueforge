@@ -5,76 +5,7 @@ import { TrueForge } from "../../../src/Client";
 import { mockServerPool } from "../../mock-server/MockServerPool";
 
 describe("TurnsClient", () => {
-    test("close_zombie (1)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { session_id: "session_id", tenant_id: "tenant_id", turn_id: "turn_id" };
-
-        server
-            .mockEndpoint()
-            .post("/api/internal/turns/close-zombie")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(200)
-            .build();
-
-        const response = await client.internal.turns.closeZombie({
-            sessionId: "session_id",
-            tenantId: "tenant_id",
-            turnId: "turn_id",
-        });
-        expect(response).toEqual(undefined);
-    });
-
-    test("close_zombie (2)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { session_id: "x", tenant_id: "x", turn_id: "x" };
-        const rawResponseBody = { error: { message: "message" } };
-
-        server
-            .mockEndpoint()
-            .post("/api/internal/turns/close-zombie")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(401)
-            .jsonBody(rawResponseBody)
-            .build();
-
-        await expect(async () => {
-            return await client.internal.turns.closeZombie({
-                sessionId: "x",
-                tenantId: "x",
-                turnId: "x",
-            });
-        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
-    });
-
-    test("close_zombie (3)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { session_id: "x", tenant_id: "x", turn_id: "x" };
-        const rawResponseBody = { error: { message: "message" } };
-
-        server
-            .mockEndpoint()
-            .post("/api/internal/turns/close-zombie")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(404)
-            .jsonBody(rawResponseBody)
-            .build();
-
-        await expect(async () => {
-            return await client.internal.turns.closeZombie({
-                sessionId: "x",
-                tenantId: "x",
-                turnId: "x",
-            });
-        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
-    });
-
-    test("list_zombie (1)", async () => {
+    test("list_abandoned (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
 
@@ -82,13 +13,13 @@ describe("TurnsClient", () => {
 
         server
             .mockEndpoint()
-            .get("/api/internal/turns/zombie")
+            .get("/api/internal/turns/abandoned")
             .respondWith()
             .statusCode(200)
             .jsonBody(rawResponseBody)
             .build();
 
-        const response = await client.internal.turns.listZombie();
+        const response = await client.internal.turns.listAbandoned();
         expect(response).toEqual({
             data: [
                 {
@@ -100,7 +31,7 @@ describe("TurnsClient", () => {
         });
     });
 
-    test("list_zombie (2)", async () => {
+    test("list_abandoned (2)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
 
@@ -108,14 +39,83 @@ describe("TurnsClient", () => {
 
         server
             .mockEndpoint()
-            .get("/api/internal/turns/zombie")
+            .get("/api/internal/turns/abandoned")
             .respondWith()
             .statusCode(401)
             .jsonBody(rawResponseBody)
             .build();
 
         await expect(async () => {
-            return await client.internal.turns.listZombie();
+            return await client.internal.turns.listAbandoned();
         }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+
+    test("close_abandoned (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { session_id: "session_id", tenant_id: "tenant_id", turn_id: "turn_id" };
+
+        server
+            .mockEndpoint()
+            .post("/api/internal/turns/close-abandoned")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(200)
+            .build();
+
+        const response = await client.internal.turns.closeAbandoned({
+            sessionId: "session_id",
+            tenantId: "tenant_id",
+            turnId: "turn_id",
+        });
+        expect(response).toEqual(undefined);
+    });
+
+    test("close_abandoned (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { session_id: "x", tenant_id: "x", turn_id: "x" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/internal/turns/close-abandoned")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.internal.turns.closeAbandoned({
+                sessionId: "x",
+                tenantId: "x",
+                turnId: "x",
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+
+    test("close_abandoned (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { session_id: "x", tenant_id: "x", turn_id: "x" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/internal/turns/close-abandoned")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.internal.turns.closeAbandoned({
+                sessionId: "x",
+                tenantId: "x",
+                turnId: "x",
+            });
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
 });

@@ -4,16 +4,16 @@ import type * as TrueForge from "../../../../../../../api/index.js";
 import * as core from "../../../../../../../core/index.js";
 import type * as serializers from "../../../../../../index.js";
 
-export const CloseZombieTurnRequest: core.serialization.Schema<
-    serializers.internal.CloseZombieTurnRequest.Raw,
-    TrueForge.internal.CloseZombieTurnRequest
+export const CloseAbandonedTurnRequest: core.serialization.Schema<
+    serializers.internal.CloseAbandonedTurnRequest.Raw,
+    TrueForge.internal.CloseAbandonedTurnRequest
 > = core.serialization.object({
     sessionId: core.serialization.property("session_id", core.serialization.string()),
     tenantId: core.serialization.property("tenant_id", core.serialization.string()),
     turnId: core.serialization.property("turn_id", core.serialization.string()),
 });
 
-export declare namespace CloseZombieTurnRequest {
+export declare namespace CloseAbandonedTurnRequest {
     export interface Raw {
         session_id: string;
         tenant_id: string;

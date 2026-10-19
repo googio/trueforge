@@ -10,6 +10,7 @@ import { HTTPException } from 'hono/http-exception';
 import { randomUUID } from 'node:crypto';
 import type { Configuration } from 'openid-client';
 import type { Logger } from 'winston';
+import { createAbandonedTurnsRouter } from './apis/abandonedTurns';
 import { createAgentsRouter } from './apis/agents';
 import { createAuthRouter } from './apis/auth';
 import { createCapabilitiesRouter } from './apis/capabilities';
@@ -26,7 +27,6 @@ import { createInternalSessionsRouter, createSessionsRouter } from './apis/sessi
 import { createSettingsRouter } from './apis/settings';
 import { createAvailableSkillsRouter } from './apis/skills';
 import { createTurnsRouter } from './apis/turns';
-import { createZombieTurnsRouter } from './apis/zombieTurns';
 import type { Authenticator } from './auth/authenticator';
 import type { Authorizer } from './auth/authorizer';
 import { resolveRequestContext } from './auth/identity';
@@ -495,7 +495,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   app.route(
     '/api/internal/turns',
     withAuth(
-      createZombieTurnsRouter({
+      createAbandonedTurnsRouter({
         sessionStore: deps.sessionStore,
         sessions: deps.sessions,
         activeTurns: deps.activeTurns,

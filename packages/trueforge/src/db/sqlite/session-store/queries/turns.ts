@@ -816,6 +816,8 @@ export async function listTurns(db: Kysely<Database>, input: ListTurnsInput): Pr
  * listStaleRunningTurns — running turns whose last event (or created_at) is before older_than.
  * Oldest-first; no limit. Timestamps are ISO strings on SQLite.
  * Joins session for tenant_id (needed to load the session on close).
+ * Last-event aggregate is restricted to currently running turns so finished turns' events
+ * are not scanned.
  */
 export async function listStaleRunningTurns(
   db: Kysely<Database>,
@@ -828,10 +830,14 @@ export async function listStaleRunningTurns(
     .leftJoin(
       eb =>
         eb
-          .selectFrom('session_event')
-          .select(['session_id', 'turn_id'])
-          .select(eb2 => eb2.fn.max('created_at').as('last_event_at'))
-          .groupBy(['session_id', 'turn_id'])
+          .selectFrom('session_event as e')
+          .innerJoin('turn as rt', join =>
+            join.onRef('rt.session_id', '=', 'e.session_id').onRef('rt.turn_id', '=', 'e.turn_id'),
+          )
+          .select(['e.session_id', 'e.turn_id'])
+          .select(eb2 => eb2.fn.max('e.created_at').as('last_event_at'))
+          .where(sql<boolean>`rt.state->>'status' = 'running'`)
+          .groupBy(['e.session_id', 'e.turn_id'])
           .as('e'),
       join => join.onRef('e.session_id', '=', 't.session_id').onRef('e.turn_id', '=', 't.turn_id'),
     )

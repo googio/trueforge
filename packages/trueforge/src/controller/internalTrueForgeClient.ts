@@ -36,8 +36,8 @@ export const internalTrueForgeClient = {
     await client.internal.sandboxEnvironments.progress({ environmentVersionId });
   },
 
-  async listZombieTurns(): Promise<{ tenantId: string; sessionId: string; turnId: string }[]> {
-    const response = await client.internal.turns.listZombie();
+  async listAbandonedTurns(): Promise<{ tenantId: string; sessionId: string; turnId: string }[]> {
+    const response = await client.internal.turns.listAbandoned();
     return response.data.map(row => ({
       tenantId: row.tenantId,
       sessionId: row.sessionId,
@@ -45,8 +45,8 @@ export const internalTrueForgeClient = {
     }));
   },
 
-  async closeZombieTurn(input: { tenantId: string; sessionId: string; turnId: string }): Promise<void> {
-    await client.internal.turns.closeZombie({
+  async closeAbandonedTurn(input: { tenantId: string; sessionId: string; turnId: string }): Promise<void> {
+    await client.internal.turns.closeAbandoned({
       tenantId: input.tenantId,
       sessionId: input.sessionId,
       turnId: input.turnId,

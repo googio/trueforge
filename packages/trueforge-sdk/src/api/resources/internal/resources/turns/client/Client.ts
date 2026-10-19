@@ -24,9 +24,89 @@ export class TurnsClient {
     }
 
     /**
-     * Cancels a zombie turn (turn.done with abandoned reason).
+     * Returns all running turns whose last activity is past the stale threshold.
      *
-     * @param {TrueForge.internal.CloseZombieTurnRequest} request
+     * @param {TurnsClient.RequestOptions} requestOptions - Request-specific configuration.
+     *
+     * @throws {@link TrueForge.UnauthorizedError}
+     * @throws {@link errors.TrueForgeError}
+     * @throws {@link errors.TrueForgeTimeoutError}
+     *
+     * @example
+     *     await client.internal.turns.listAbandoned()
+     */
+    public listAbandoned(
+        requestOptions?: TurnsClient.RequestOptions,
+    ): core.HttpResponsePromise<TrueForge.ListAbandonedTurnsResponse> {
+        return core.HttpResponsePromise.fromPromise(this.__listAbandoned(requestOptions));
+    }
+
+    private async __listAbandoned(
+        requestOptions?: TurnsClient.RequestOptions,
+    ): Promise<core.WithRawResponse<TrueForge.ListAbandonedTurnsResponse>> {
+        const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
+        const _headers: core.Fetcher.Args["headers"] = mergeHeaders(
+            _authRequest.headers,
+            this._options?.headers,
+            requestOptions?.headers,
+        );
+        const _response = await (this._options.fetcher ?? core.fetcher)({
+            url: core.url.join(
+                (await core.Supplier.get(this._options.baseUrl)) ??
+                    (await core.Supplier.get(this._options.environment)),
+                "api/internal/turns/abandoned",
+            ),
+            method: "GET",
+            headers: _headers,
+            queryString: core.url.queryBuilder().mergeAdditional(requestOptions?.queryParams).build(),
+            timeoutMs: (requestOptions?.timeoutInSeconds ?? this._options?.timeoutInSeconds ?? 60) * 1000,
+            maxRetries: requestOptions?.maxRetries ?? this._options?.maxRetries,
+            abortSignal: requestOptions?.abortSignal,
+            fetchFn: this._options?.fetch,
+            logging: this._options.logging,
+        });
+        if (_response.ok) {
+            return {
+                data: serializers.ListAbandonedTurnsResponse.parseOrThrow(_response.body, {
+                    unrecognizedObjectKeys: "passthrough",
+                    allowUnrecognizedUnionMembers: true,
+                    allowUnrecognizedEnumValues: true,
+                    skipValidation: true,
+                    breadcrumbsPrefix: ["response"],
+                }),
+                rawResponse: _response.rawResponse,
+            };
+        }
+
+        if (_response.error.reason === "status-code") {
+            switch (_response.error.statusCode) {
+                case 401:
+                    throw new TrueForge.UnauthorizedError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                default:
+                    throw new errors.TrueForgeError({
+                        statusCode: _response.error.statusCode,
+                        body: _response.error.body,
+                        rawResponse: _response.rawResponse,
+                    });
+            }
+        }
+
+        return handleNonStatusCodeError(_response.error, _response.rawResponse, "GET", "/api/internal/turns/abandoned");
+    }
+
+    /**
+     * Cancels a stale running turn (turn.done with abandoned reason).
+     *
+     * @param {TrueForge.internal.CloseAbandonedTurnRequest} request
      * @param {TurnsClient.RequestOptions} requestOptions - Request-specific configuration.
      *
      * @throws {@link TrueForge.UnauthorizedError}
@@ -35,21 +115,21 @@ export class TurnsClient {
      * @throws {@link errors.TrueForgeTimeoutError}
      *
      * @example
-     *     await client.internal.turns.closeZombie({
+     *     await client.internal.turns.closeAbandoned({
      *         sessionId: "session_id",
      *         tenantId: "tenant_id",
      *         turnId: "turn_id"
      *     })
      */
-    public closeZombie(
-        request: TrueForge.internal.CloseZombieTurnRequest,
+    public closeAbandoned(
+        request: TrueForge.internal.CloseAbandonedTurnRequest,
         requestOptions?: TurnsClient.RequestOptions,
     ): core.HttpResponsePromise<void> {
-        return core.HttpResponsePromise.fromPromise(this.__closeZombie(request, requestOptions));
+        return core.HttpResponsePromise.fromPromise(this.__closeAbandoned(request, requestOptions));
     }
 
-    private async __closeZombie(
-        request: TrueForge.internal.CloseZombieTurnRequest,
+    private async __closeAbandoned(
+        request: TrueForge.internal.CloseAbandonedTurnRequest,
         requestOptions?: TurnsClient.RequestOptions,
     ): Promise<core.WithRawResponse<void>> {
         const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
@@ -62,7 +142,7 @@ export class TurnsClient {
             url: core.url.join(
                 (await core.Supplier.get(this._options.baseUrl)) ??
                     (await core.Supplier.get(this._options.environment)),
-                "api/internal/turns/close-zombie",
+                "api/internal/turns/close-abandoned",
             ),
             method: "POST",
             headers: _headers,
@@ -70,7 +150,7 @@ export class TurnsClient {
             queryString: core.url.queryBuilder().mergeAdditional(requestOptions?.queryParams).build(),
             requestType: "json",
             body: mergeAdditionalBodyParameters(
-                serializers.internal.CloseZombieTurnRequest.jsonOrThrow(request, {
+                serializers.internal.CloseAbandonedTurnRequest.jsonOrThrow(request, {
                     unrecognizedObjectKeys: "passthrough",
                     allowUnrecognizedUnionMembers: true,
                     allowUnrecognizedEnumValues: true,
@@ -125,87 +205,7 @@ export class TurnsClient {
             _response.error,
             _response.rawResponse,
             "POST",
-            "/api/internal/turns/close-zombie",
+            "/api/internal/turns/close-abandoned",
         );
-    }
-
-    /**
-     * Returns all running turns whose last activity is past the stale threshold.
-     *
-     * @param {TurnsClient.RequestOptions} requestOptions - Request-specific configuration.
-     *
-     * @throws {@link TrueForge.UnauthorizedError}
-     * @throws {@link errors.TrueForgeError}
-     * @throws {@link errors.TrueForgeTimeoutError}
-     *
-     * @example
-     *     await client.internal.turns.listZombie()
-     */
-    public listZombie(
-        requestOptions?: TurnsClient.RequestOptions,
-    ): core.HttpResponsePromise<TrueForge.ListZombieTurnsResponse> {
-        return core.HttpResponsePromise.fromPromise(this.__listZombie(requestOptions));
-    }
-
-    private async __listZombie(
-        requestOptions?: TurnsClient.RequestOptions,
-    ): Promise<core.WithRawResponse<TrueForge.ListZombieTurnsResponse>> {
-        const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
-        const _headers: core.Fetcher.Args["headers"] = mergeHeaders(
-            _authRequest.headers,
-            this._options?.headers,
-            requestOptions?.headers,
-        );
-        const _response = await (this._options.fetcher ?? core.fetcher)({
-            url: core.url.join(
-                (await core.Supplier.get(this._options.baseUrl)) ??
-                    (await core.Supplier.get(this._options.environment)),
-                "api/internal/turns/zombie",
-            ),
-            method: "GET",
-            headers: _headers,
-            queryString: core.url.queryBuilder().mergeAdditional(requestOptions?.queryParams).build(),
-            timeoutMs: (requestOptions?.timeoutInSeconds ?? this._options?.timeoutInSeconds ?? 60) * 1000,
-            maxRetries: requestOptions?.maxRetries ?? this._options?.maxRetries,
-            abortSignal: requestOptions?.abortSignal,
-            fetchFn: this._options?.fetch,
-            logging: this._options.logging,
-        });
-        if (_response.ok) {
-            return {
-                data: serializers.ListZombieTurnsResponse.parseOrThrow(_response.body, {
-                    unrecognizedObjectKeys: "passthrough",
-                    allowUnrecognizedUnionMembers: true,
-                    allowUnrecognizedEnumValues: true,
-                    skipValidation: true,
-                    breadcrumbsPrefix: ["response"],
-                }),
-                rawResponse: _response.rawResponse,
-            };
-        }
-
-        if (_response.error.reason === "status-code") {
-            switch (_response.error.statusCode) {
-                case 401:
-                    throw new TrueForge.UnauthorizedError(
-                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
-                            unrecognizedObjectKeys: "passthrough",
-                            allowUnrecognizedUnionMembers: true,
-                            allowUnrecognizedEnumValues: true,
-                            skipValidation: true,
-                            breadcrumbsPrefix: ["response"],
-                        }),
-                        _response.rawResponse,
-                    );
-                default:
-                    throw new errors.TrueForgeError({
-                        statusCode: _response.error.statusCode,
-                        body: _response.error.body,
-                        rawResponse: _response.rawResponse,
-                    });
-            }
-        }
-
-        return handleNonStatusCodeError(_response.error, _response.rawResponse, "GET", "/api/internal/turns/zombie");
     }
 }

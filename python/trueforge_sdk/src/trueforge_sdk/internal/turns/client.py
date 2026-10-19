@@ -4,7 +4,7 @@ import typing
 
 from ...core.client_wrapper import AsyncClientWrapper, SyncClientWrapper
 from ...core.request_options import RequestOptions
-from ...types.list_zombie_turns_response import ListZombieTurnsResponse
+from ...types.list_abandoned_turns_response import ListAbandonedTurnsResponse
 from .raw_client import AsyncRawTurnsClient, RawTurnsClient
 
 # this is used as the default value for optional parameters
@@ -26,11 +26,38 @@ class TurnsClient:
         """
         return self._raw_client
 
-    def close_zombie(
+    def list_abandoned(self, *, request_options: typing.Optional[RequestOptions] = None) -> ListAbandonedTurnsResponse:
+        """
+        Returns all running turns whose last activity is past the stale threshold.
+
+        Parameters
+        ----------
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        ListAbandonedTurnsResponse
+            Stale running turns oldest-first.
+
+        Examples
+        --------
+        from trueforge_sdk import TrueForge
+
+        client = TrueForge(
+            token="YOUR_TOKEN",
+            base_url="https://yourhost.com/path/to/api",
+        )
+        client.internal.turns.list_abandoned()
+        """
+        _response = self._raw_client.list_abandoned(request_options=request_options)
+        return _response.data
+
+    def close_abandoned(
         self, *, session_id: str, tenant_id: str, turn_id: str, request_options: typing.Optional[RequestOptions] = None
     ) -> None:
         """
-        Cancels a zombie turn (turn.done with abandoned reason).
+        Cancels a stale running turn (turn.done with abandoned reason).
 
         Parameters
         ----------
@@ -58,42 +85,15 @@ class TurnsClient:
             token="YOUR_TOKEN",
             base_url="https://yourhost.com/path/to/api",
         )
-        client.internal.turns.close_zombie(
+        client.internal.turns.close_abandoned(
             session_id="session_id",
             tenant_id="tenant_id",
             turn_id="turn_id",
         )
         """
-        _response = self._raw_client.close_zombie(
+        _response = self._raw_client.close_abandoned(
             session_id=session_id, tenant_id=tenant_id, turn_id=turn_id, request_options=request_options
         )
-        return _response.data
-
-    def list_zombie(self, *, request_options: typing.Optional[RequestOptions] = None) -> ListZombieTurnsResponse:
-        """
-        Returns all running turns whose last activity is past the stale threshold.
-
-        Parameters
-        ----------
-        request_options : typing.Optional[RequestOptions]
-            Request-specific configuration.
-
-        Returns
-        -------
-        ListZombieTurnsResponse
-            Stale running turns oldest-first.
-
-        Examples
-        --------
-        from trueforge_sdk import TrueForge
-
-        client = TrueForge(
-            token="YOUR_TOKEN",
-            base_url="https://yourhost.com/path/to/api",
-        )
-        client.internal.turns.list_zombie()
-        """
-        _response = self._raw_client.list_zombie(request_options=request_options)
         return _response.data
 
 
@@ -112,11 +112,48 @@ class AsyncTurnsClient:
         """
         return self._raw_client
 
-    async def close_zombie(
+    async def list_abandoned(
+        self, *, request_options: typing.Optional[RequestOptions] = None
+    ) -> ListAbandonedTurnsResponse:
+        """
+        Returns all running turns whose last activity is past the stale threshold.
+
+        Parameters
+        ----------
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        ListAbandonedTurnsResponse
+            Stale running turns oldest-first.
+
+        Examples
+        --------
+        import asyncio
+
+        from trueforge_sdk import AsyncTrueForge
+
+        client = AsyncTrueForge(
+            token="YOUR_TOKEN",
+            base_url="https://yourhost.com/path/to/api",
+        )
+
+
+        async def main() -> None:
+            await client.internal.turns.list_abandoned()
+
+
+        asyncio.run(main())
+        """
+        _response = await self._raw_client.list_abandoned(request_options=request_options)
+        return _response.data
+
+    async def close_abandoned(
         self, *, session_id: str, tenant_id: str, turn_id: str, request_options: typing.Optional[RequestOptions] = None
     ) -> None:
         """
-        Cancels a zombie turn (turn.done with abandoned reason).
+        Cancels a stale running turn (turn.done with abandoned reason).
 
         Parameters
         ----------
@@ -149,7 +186,7 @@ class AsyncTurnsClient:
 
 
         async def main() -> None:
-            await client.internal.turns.close_zombie(
+            await client.internal.turns.close_abandoned(
                 session_id="session_id",
                 tenant_id="tenant_id",
                 turn_id="turn_id",
@@ -158,42 +195,7 @@ class AsyncTurnsClient:
 
         asyncio.run(main())
         """
-        _response = await self._raw_client.close_zombie(
+        _response = await self._raw_client.close_abandoned(
             session_id=session_id, tenant_id=tenant_id, turn_id=turn_id, request_options=request_options
         )
-        return _response.data
-
-    async def list_zombie(self, *, request_options: typing.Optional[RequestOptions] = None) -> ListZombieTurnsResponse:
-        """
-        Returns all running turns whose last activity is past the stale threshold.
-
-        Parameters
-        ----------
-        request_options : typing.Optional[RequestOptions]
-            Request-specific configuration.
-
-        Returns
-        -------
-        ListZombieTurnsResponse
-            Stale running turns oldest-first.
-
-        Examples
-        --------
-        import asyncio
-
-        from trueforge_sdk import AsyncTrueForge
-
-        client = AsyncTrueForge(
-            token="YOUR_TOKEN",
-            base_url="https://yourhost.com/path/to/api",
-        )
-
-
-        async def main() -> None:
-            await client.internal.turns.list_zombie()
-
-
-        asyncio.run(main())
-        """
-        _response = await self._raw_client.list_zombie(request_options=request_options)
         return _response.data

@@ -1,24 +1,24 @@
 /**
- * Internal zombie-turn closer routes (API-key auth).
+ * Internal abandoned-turn closer routes (API-key auth).
  * Mounted at /api/internal/turns.
  */
 import { createRoute } from '@hono/zod-openapi';
+import { CloseAbandonedTurnRequestSchema, ListAbandonedTurnsResponseSchema } from '../schemas/abandonedTurn';
 import { RequestErrorResponseSchema } from '../schemas/errors';
-import { CloseZombieTurnRequestSchema, ListZombieTurnsResponseSchema } from '../schemas/zombieTurn';
 import { OpenApiTag } from './openapiTags';
 
-export const listZombieTurnsRoute = createRoute({
+export const listAbandonedTurnsRoute = createRoute({
   method: 'get',
-  path: '/zombie',
+  path: '/abandoned',
   tags: [OpenApiTag.INTERNAL],
-  summary: 'List stale running turns',
+  summary: 'List abandoned running turns',
   description: 'Returns all running turns whose last activity is past the stale threshold.',
   'x-fern-sdk-group-name': ['internal', 'turns'],
-  'x-fern-sdk-method-name': 'list_zombie',
+  'x-fern-sdk-method-name': 'list_abandoned',
   'x-excluded': true,
   responses: {
     200: {
-      content: { 'application/json': { schema: ListZombieTurnsResponseSchema } },
+      content: { 'application/json': { schema: ListAbandonedTurnsResponseSchema } },
       description: 'Stale running turns oldest-first.',
     },
     401: {
@@ -28,18 +28,18 @@ export const listZombieTurnsRoute = createRoute({
   },
 });
 
-export const closeZombieTurnRoute = createRoute({
+export const closeAbandonedTurnRoute = createRoute({
   method: 'post',
-  path: '/close-zombie',
+  path: '/close-abandoned',
   tags: [OpenApiTag.INTERNAL],
-  summary: 'Close a stale running turn',
-  description: 'Cancels a zombie turn (turn.done with abandoned reason).',
+  summary: 'Close an abandoned running turn',
+  description: 'Cancels a stale running turn (turn.done with abandoned reason).',
   'x-fern-sdk-group-name': ['internal', 'turns'],
-  'x-fern-sdk-method-name': 'close_zombie',
+  'x-fern-sdk-method-name': 'close_abandoned',
   'x-excluded': true,
   request: {
     body: {
-      content: { 'application/json': { schema: CloseZombieTurnRequestSchema } },
+      content: { 'application/json': { schema: CloseAbandonedTurnRequestSchema } },
       required: true,
     },
   },

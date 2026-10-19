@@ -1,16 +1,16 @@
 /**
- * Internal API for the zombie-turn closer controller.
+ * Internal API for the abandoned-turn closer controller.
  */
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 import { CancellationReason, type ISessionStore, type Sessions } from '@truefoundry/trueforge-core/agent-session';
 import type { RedisClient } from '@truefoundry/trueforge-core/request-reply';
 import type { Logger } from 'winston';
 import configuration from '../config';
-import { closeZombieTurnRoute, listZombieTurnsRoute } from '../routes/zombieTurnRoutes';
+import { closeAbandonedTurnRoute, listAbandonedTurnsRoute } from '../routes/abandonedTurnRoutes';
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { cancelSessionTurn } from './sessions';
 
-export interface ZombieTurnsRouterDeps {
+export interface AbandonedTurnsRouterDeps {
   sessionStore: ISessionStore;
   sessions: Sessions;
   activeTurns: ActiveTurnRegistry;
@@ -18,9 +18,9 @@ export interface ZombieTurnsRouterDeps {
   logger: Logger;
 }
 
-export function createZombieTurnsRouter(deps: ZombieTurnsRouterDeps) {
-  const listHandler: RouteHandler<typeof listZombieTurnsRoute> = async c => {
-    const olderThan = new Date(Date.now() - configuration.ZOMBIE_TURN_STALE_MS);
+export function createAbandonedTurnsRouter(deps: AbandonedTurnsRouterDeps) {
+  const listHandler: RouteHandler<typeof listAbandonedTurnsRoute> = async c => {
+    const olderThan = new Date(Date.now() - configuration.ABANDONED_TURN_STALE_MS);
     const stale = await deps.sessionStore.listStaleRunningTurns({ older_than: olderThan });
     return c.json(
       {
@@ -34,7 +34,7 @@ export function createZombieTurnsRouter(deps: ZombieTurnsRouterDeps) {
     );
   };
 
-  const closeHandler: RouteHandler<typeof closeZombieTurnRoute> = async c => {
+  const closeHandler: RouteHandler<typeof closeAbandonedTurnRoute> = async c => {
     const body = c.req.valid('json');
     const session = await deps.sessions.get({
       tenant_id: body.tenant_id,
@@ -57,7 +57,7 @@ export function createZombieTurnsRouter(deps: ZombieTurnsRouterDeps) {
   };
 
   const router = new OpenAPIHono();
-  router.openapi(listZombieTurnsRoute, listHandler);
-  router.openapi(closeZombieTurnRoute, closeHandler);
+  router.openapi(listAbandonedTurnsRoute, listHandler);
+  router.openapi(closeAbandonedTurnRoute, closeHandler);
   return router;
 }

@@ -4,14 +4,14 @@ import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 
-export const ZombieTurn: core.serialization.ObjectSchema<serializers.ZombieTurn.Raw, TrueForge.ZombieTurn> =
+export const AbandonedTurn: core.serialization.ObjectSchema<serializers.AbandonedTurn.Raw, TrueForge.AbandonedTurn> =
     core.serialization.object({
         sessionId: core.serialization.property("session_id", core.serialization.string()),
         tenantId: core.serialization.property("tenant_id", core.serialization.string()),
         turnId: core.serialization.property("turn_id", core.serialization.string()),
     });
 
-export declare namespace ZombieTurn {
+export declare namespace AbandonedTurn {
     export interface Raw {
         session_id: string;
         tenant_id: string;

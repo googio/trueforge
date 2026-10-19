@@ -11,7 +11,7 @@ from ...core.request_options import RequestOptions
 from ...core.unchecked_base_model import construct_type
 from ...errors.not_found_error import NotFoundError
 from ...errors.unauthorized_error import UnauthorizedError
-from ...types.list_zombie_turns_response import ListZombieTurnsResponse
+from ...types.list_abandoned_turns_response import ListAbandonedTurnsResponse
 from ...types.request_error_response import RequestErrorResponse
 from pydantic import ValidationError
 
@@ -23,11 +23,62 @@ class RawTurnsClient:
     def __init__(self, *, client_wrapper: SyncClientWrapper):
         self._client_wrapper = client_wrapper
 
-    def close_zombie(
+    def list_abandoned(
+        self, *, request_options: typing.Optional[RequestOptions] = None
+    ) -> HttpResponse[ListAbandonedTurnsResponse]:
+        """
+        Returns all running turns whose last activity is past the stale threshold.
+
+        Parameters
+        ----------
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        HttpResponse[ListAbandonedTurnsResponse]
+            Stale running turns oldest-first.
+        """
+        _response = self._client_wrapper.httpx_client.request(
+            "api/internal/turns/abandoned",
+            method="GET",
+            request_options=request_options,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                _data = typing.cast(
+                    ListAbandonedTurnsResponse,
+                    construct_type(
+                        type_=ListAbandonedTurnsResponse,  # type: ignore
+                        object_=_response.json(),
+                    ),
+                )
+                return HttpResponse(response=_response, data=_data)
+            if _response.status_code == 401:
+                raise UnauthorizedError(
+                    headers=dict(_response.headers),
+                    body=typing.cast(
+                        RequestErrorResponse,
+                        construct_type(
+                            type_=RequestErrorResponse,  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    ),
+                )
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response.text)
+        except ValidationError as e:
+            raise ParsingError(
+                status_code=_response.status_code, headers=dict(_response.headers), body=_response.json(), cause=e
+            )
+        raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response_json)
+
+    def close_abandoned(
         self, *, session_id: str, tenant_id: str, turn_id: str, request_options: typing.Optional[RequestOptions] = None
     ) -> HttpResponse[None]:
         """
-        Cancels a zombie turn (turn.done with abandoned reason).
+        Cancels a stale running turn (turn.done with abandoned reason).
 
         Parameters
         ----------
@@ -48,7 +99,7 @@ class RawTurnsClient:
         HttpResponse[None]
         """
         _response = self._client_wrapper.httpx_client.request(
-            "api/internal/turns/close-zombie",
+            "api/internal/turns/close-abandoned",
             method="POST",
             json={
                 "session_id": session_id,
@@ -95,9 +146,14 @@ class RawTurnsClient:
             )
         raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response_json)
 
-    def list_zombie(
+
+class AsyncRawTurnsClient:
+    def __init__(self, *, client_wrapper: AsyncClientWrapper):
+        self._client_wrapper = client_wrapper
+
+    async def list_abandoned(
         self, *, request_options: typing.Optional[RequestOptions] = None
-    ) -> HttpResponse[ListZombieTurnsResponse]:
+    ) -> AsyncHttpResponse[ListAbandonedTurnsResponse]:
         """
         Returns all running turns whose last activity is past the stale threshold.
 
@@ -108,24 +164,24 @@ class RawTurnsClient:
 
         Returns
         -------
-        HttpResponse[ListZombieTurnsResponse]
+        AsyncHttpResponse[ListAbandonedTurnsResponse]
             Stale running turns oldest-first.
         """
-        _response = self._client_wrapper.httpx_client.request(
-            "api/internal/turns/zombie",
+        _response = await self._client_wrapper.httpx_client.request(
+            "api/internal/turns/abandoned",
             method="GET",
             request_options=request_options,
         )
         try:
             if 200 <= _response.status_code < 300:
                 _data = typing.cast(
-                    ListZombieTurnsResponse,
+                    ListAbandonedTurnsResponse,
                     construct_type(
-                        type_=ListZombieTurnsResponse,  # type: ignore
+                        type_=ListAbandonedTurnsResponse,  # type: ignore
                         object_=_response.json(),
                     ),
                 )
-                return HttpResponse(response=_response, data=_data)
+                return AsyncHttpResponse(response=_response, data=_data)
             if _response.status_code == 401:
                 raise UnauthorizedError(
                     headers=dict(_response.headers),
@@ -146,16 +202,11 @@ class RawTurnsClient:
             )
         raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response_json)
 
-
-class AsyncRawTurnsClient:
-    def __init__(self, *, client_wrapper: AsyncClientWrapper):
-        self._client_wrapper = client_wrapper
-
-    async def close_zombie(
+    async def close_abandoned(
         self, *, session_id: str, tenant_id: str, turn_id: str, request_options: typing.Optional[RequestOptions] = None
     ) -> AsyncHttpResponse[None]:
         """
-        Cancels a zombie turn (turn.done with abandoned reason).
+        Cancels a stale running turn (turn.done with abandoned reason).
 
         Parameters
         ----------
@@ -176,7 +227,7 @@ class AsyncRawTurnsClient:
         AsyncHttpResponse[None]
         """
         _response = await self._client_wrapper.httpx_client.request(
-            "api/internal/turns/close-zombie",
+            "api/internal/turns/close-abandoned",
             method="POST",
             json={
                 "session_id": session_id,
@@ -205,57 +256,6 @@ class AsyncRawTurnsClient:
                 )
             if _response.status_code == 404:
                 raise NotFoundError(
-                    headers=dict(_response.headers),
-                    body=typing.cast(
-                        RequestErrorResponse,
-                        construct_type(
-                            type_=RequestErrorResponse,  # type: ignore
-                            object_=_response.json(),
-                        ),
-                    ),
-                )
-            _response_json = _response.json()
-        except JSONDecodeError:
-            raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response.text)
-        except ValidationError as e:
-            raise ParsingError(
-                status_code=_response.status_code, headers=dict(_response.headers), body=_response.json(), cause=e
-            )
-        raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response_json)
-
-    async def list_zombie(
-        self, *, request_options: typing.Optional[RequestOptions] = None
-    ) -> AsyncHttpResponse[ListZombieTurnsResponse]:
-        """
-        Returns all running turns whose last activity is past the stale threshold.
-
-        Parameters
-        ----------
-        request_options : typing.Optional[RequestOptions]
-            Request-specific configuration.
-
-        Returns
-        -------
-        AsyncHttpResponse[ListZombieTurnsResponse]
-            Stale running turns oldest-first.
-        """
-        _response = await self._client_wrapper.httpx_client.request(
-            "api/internal/turns/zombie",
-            method="GET",
-            request_options=request_options,
-        )
-        try:
-            if 200 <= _response.status_code < 300:
-                _data = typing.cast(
-                    ListZombieTurnsResponse,
-                    construct_type(
-                        type_=ListZombieTurnsResponse,  # type: ignore
-                        object_=_response.json(),
-                    ),
-                )
-                return AsyncHttpResponse(response=_response, data=_data)
-            if _response.status_code == 401:
-                raise UnauthorizedError(
                     headers=dict(_response.headers),
                     body=typing.cast(
                         RequestErrorResponse,

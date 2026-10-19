@@ -2,6 +2,6 @@
 
 import type * as TrueForge from "../index.js";
 
-export interface ListZombieTurnsResponse {
-    data: TrueForge.ZombieTurn[];
+export interface ListAbandonedTurnsResponse {
+    data: TrueForge.AbandonedTurn[];
 }

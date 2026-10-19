@@ -2,6 +2,32 @@
   "components": {
     "parameters": {},
     "schemas": {
+      "AbandonedTurn": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "description": "Session that owns the turn.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "tenant_id": {
+            "description": "Tenant that owns the session.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "turn_id": {
+            "description": "Running turn with stale last activity.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "session_id",
+          "turn_id"
+        ],
+        "type": "object"
+      },
       "ActionRequired": {
         "properties": {
           "id": {
@@ -861,7 +887,7 @@
         ],
         "type": "object"
       },
-      "CloseZombieTurnRequest": {
+      "CloseAbandonedTurnRequest": {
         "additionalProperties": false,
         "properties": {
           "session_id": {
@@ -1916,6 +1942,21 @@
         },
         "type": "object"
       },
+      "ListAbandonedTurnsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/AbandonedTurn"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListAgentsResponse": {
         "properties": {
           "data": {
@@ -2258,21 +2299,6 @@
         "required": [
           "data",
           "pagination"
-        ],
-        "type": "object"
-      },
-      "ListZombieTurnsResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/ZombieTurn"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "data"
         ],
         "type": "object"
       },
@@ -6251,32 +6277,6 @@
           "type"
         ],
         "type": "object"
-      },
-      "ZombieTurn": {
-        "additionalProperties": false,
-        "properties": {
-          "session_id": {
-            "description": "Session that owns the turn.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "tenant_id": {
-            "description": "Tenant that owns the session.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "turn_id": {
-            "description": "Running turn with stale last activity.",
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "tenant_id",
-          "session_id",
-          "turn_id"
-        ],
-        "type": "object"
       }
     },
     "securitySchemes": {
@@ -6767,14 +6767,51 @@
         "x-fern-sdk-method-name": "get_or_create_by_external_id"
       }
     },
-    "/api/internal/turns/close-zombie": {
+    "/api/internal/turns/abandoned": {
+      "get": {
+        "description": "Returns all running turns whose last activity is past the stale threshold.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListAbandonedTurnsResponse"
+                }
+              }
+            },
+            "description": "Stale running turns oldest-first."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid service credential."
+          }
+        },
+        "summary": "List abandoned running turns",
+        "tags": [
+          "Internal"
+        ],
+        "x-excluded": true,
+        "x-fern-sdk-group-name": [
+          "internal",
+          "turns"
+        ],
+        "x-fern-sdk-method-name": "list_abandoned"
+      }
+    },
+    "/api/internal/turns/close-abandoned": {
       "post": {
-        "description": "Cancels a zombie turn (turn.done with abandoned reason).",
+        "description": "Cancels a stale running turn (turn.done with abandoned reason).",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CloseZombieTurnRequest"
+                "$ref": "#/components/schemas/CloseAbandonedTurnRequest"
               }
             }
           },
@@ -6805,7 +6842,7 @@
             "description": "Session not found."
           }
         },
-        "summary": "Close a stale running turn",
+        "summary": "Close an abandoned running turn",
         "tags": [
           "Internal"
         ],
@@ -6814,44 +6851,7 @@
           "internal",
           "turns"
         ],
-        "x-fern-sdk-method-name": "close_zombie"
-      }
-    },
-    "/api/internal/turns/zombie": {
-      "get": {
-        "description": "Returns all running turns whose last activity is past the stale threshold.",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListZombieTurnsResponse"
-                }
-              }
-            },
-            "description": "Stale running turns oldest-first."
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "Invalid service credential."
-          }
-        },
-        "summary": "List stale running turns",
-        "tags": [
-          "Internal"
-        ],
-        "x-excluded": true,
-        "x-fern-sdk-group-name": [
-          "internal",
-          "turns"
-        ],
-        "x-fern-sdk-method-name": "list_zombie"
+        "x-fern-sdk-method-name": "close_abandoned"
       }
     },
     "/api/v1/agents": {

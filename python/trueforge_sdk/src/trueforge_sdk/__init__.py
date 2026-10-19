@@ -7,6 +7,7 @@ from importlib import import_module
 
 if typing.TYPE_CHECKING:
     from .types import (
+        AbandonedTurn,
         ActionRequired,
         ActionRequiredEvent,
         Agent,
@@ -103,6 +104,7 @@ if typing.TYPE_CHECKING:
         InitialUserMessage,
         InputTokensCompactionTrigger,
         LargeToolResponseConfig,
+        ListAbandonedTurnsResponse,
         ListAgentsResponse,
         ListAvailableMcpServersResponse,
         ListAvailableModelsResponse,
@@ -124,7 +126,6 @@ if typing.TYPE_CHECKING:
         ListTurnEventsOrder,
         ListTurnEventsResponse,
         ListTurnsResponse,
-        ListZombieTurnsResponse,
         McpAuthRequiredEvent,
         McpAuthStatus,
         McpAuthStatusStatus,
@@ -277,7 +278,6 @@ if typing.TYPE_CHECKING:
         WebSearchConfig,
         WebSearchProviderManifest,
         ZaiModelProvider,
-        ZombieTurn,
     )
     from .errors import (
         BadGatewayError,
@@ -311,6 +311,7 @@ if typing.TYPE_CHECKING:
     from .client import AsyncTrueForge, TrueForge
     from .version import __version__
 _dynamic_imports: typing.Dict[str, str] = {
+    "AbandonedTurn": ".types",
     "ActionRequired": ".types",
     "ActionRequiredEvent": ".types",
     "Agent": ".types",
@@ -418,6 +419,7 @@ _dynamic_imports: typing.Dict[str, str] = {
     "InputTokensCompactionTrigger": ".types",
     "InternalServerError": ".errors",
     "LargeToolResponseConfig": ".types",
+    "ListAbandonedTurnsResponse": ".types",
     "ListAgentsResponse": ".types",
     "ListAvailableMcpServersResponse": ".types",
     "ListAvailableModelsResponse": ".types",
@@ -439,7 +441,6 @@ _dynamic_imports: typing.Dict[str, str] = {
     "ListTurnEventsOrder": ".types",
     "ListTurnEventsResponse": ".types",
     "ListTurnsResponse": ".types",
-    "ListZombieTurnsResponse": ".types",
     "McpAuthRequiredEvent": ".types",
     "McpAuthStatus": ".types",
     "McpAuthStatusStatus": ".types",
@@ -597,7 +598,6 @@ _dynamic_imports: typing.Dict[str, str] = {
     "WebSearchConfig": ".types",
     "WebSearchProviderManifest": ".types",
     "ZaiModelProvider": ".types",
-    "ZombieTurn": ".types",
     "__version__": ".version",
     "agents": ".agents",
     "auth": ".auth",
@@ -636,6 +636,7 @@ def __dir__():
 
 
 __all__ = [
+    "AbandonedTurn",
     "ActionRequired",
     "ActionRequiredEvent",
     "Agent",
@@ -743,6 +744,7 @@ __all__ = [
     "InputTokensCompactionTrigger",
     "InternalServerError",
     "LargeToolResponseConfig",
+    "ListAbandonedTurnsResponse",
     "ListAgentsResponse",
     "ListAvailableMcpServersResponse",
     "ListAvailableModelsResponse",
@@ -764,7 +766,6 @@ __all__ = [
     "ListTurnEventsOrder",
     "ListTurnEventsResponse",
     "ListTurnsResponse",
-    "ListZombieTurnsResponse",
     "McpAuthRequiredEvent",
     "McpAuthStatus",
     "McpAuthStatusStatus",
@@ -922,7 +923,6 @@ __all__ = [
     "WebSearchConfig",
     "WebSearchProviderManifest",
     "ZaiModelProvider",
-    "ZombieTurn",
     "__version__",
     "agents",
     "auth",

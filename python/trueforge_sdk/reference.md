@@ -4384,7 +4384,7 @@ client.internal.sessions.get_or_create_by_external_id(
 </details>
 
 ## Internal Turns
-<details><summary><code>client.internal.turns.<a href="src/trueforge_sdk/internal/turns/client.py">close_zombie</a>(...)</code></summary>
+<details><summary><code>client.internal.turns.<a href="src/trueforge_sdk/internal/turns/client.py">list_abandoned</a>() -> ListAbandonedTurnsResponse</code></summary>
 <dl>
 <dd>
 
@@ -4396,7 +4396,7 @@ client.internal.sessions.get_or_create_by_external_id(
 <dl>
 <dd>
 
-Cancels a zombie turn (turn.done with abandoned reason).
+Returns all running turns whose last activity is past the stale threshold.
 </dd>
 </dl>
 </dd>
@@ -4418,7 +4418,69 @@ client = TrueForge(
     base_url="https://yourhost.com/path/to/api",
 )
 
-client.internal.turns.close_zombie(
+client.internal.turns.list_abandoned()
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request_options:** `typing.Optional[RequestOptions]` — Request-specific configuration.
+    
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.internal.turns.<a href="src/trueforge_sdk/internal/turns/client.py">close_abandoned</a>(...)</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Cancels a stale running turn (turn.done with abandoned reason).
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```python
+from trueforge_sdk import TrueForge
+
+client = TrueForge(
+    token="<token>",
+    base_url="https://yourhost.com/path/to/api",
+)
+
+client.internal.turns.close_abandoned(
     session_id="session_id",
     tenant_id="tenant_id",
     turn_id="turn_id",
@@ -4458,68 +4520,6 @@ client.internal.turns.close_zombie(
     
 </dd>
 </dl>
-
-<dl>
-<dd>
-
-**request_options:** `typing.Optional[RequestOptions]` — Request-specific configuration.
-    
-</dd>
-</dl>
-</dd>
-</dl>
-
-
-</dd>
-</dl>
-</details>
-
-<details><summary><code>client.internal.turns.<a href="src/trueforge_sdk/internal/turns/client.py">list_zombie</a>() -> ListZombieTurnsResponse</code></summary>
-<dl>
-<dd>
-
-#### 📝 Description
-
-<dl>
-<dd>
-
-<dl>
-<dd>
-
-Returns all running turns whose last activity is past the stale threshold.
-</dd>
-</dl>
-</dd>
-</dl>
-
-#### 🔌 Usage
-
-<dl>
-<dd>
-
-<dl>
-<dd>
-
-```python
-from trueforge_sdk import TrueForge
-
-client = TrueForge(
-    token="<token>",
-    base_url="https://yourhost.com/path/to/api",
-)
-
-client.internal.turns.list_zombie()
-
-```
-</dd>
-</dl>
-</dd>
-</dl>
-
-#### ⚙️ Parameters
-
-<dl>
-<dd>
 
 <dl>
 <dd>
