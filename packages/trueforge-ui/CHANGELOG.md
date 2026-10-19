@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.179.1
+
+### Patch Changes
+
+- 5d868fc: Prefix public `AnalyticsEvents` names with `trueforge.` so host sinks (e.g. PostHog) can namespace product events.
+
 ## 0.179.0
 
 ### Patch Changes

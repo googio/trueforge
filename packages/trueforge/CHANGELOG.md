@@ -1,5 +1,14 @@
 # @truefoundry/trueforge
 
+## 0.179.3
+
+### Patch Changes
+
+- 4328ef6: Add tenant, request, session, and turn ids to server and controller logs so a failure can be filtered to one request or turn. Log lines no longer include the package version.
+- 5d868fc: Only validate `model.params.reasoning_effort` against a model's advertised efforts when that list is non-empty, so models without configured efforts no longer reject specs that set it.
+- Updated dependencies [5d868fc]
+  - @truefoundry/trueforge-core@0.179.1
+
 ## 0.179.2
 
 ### Patch Changes

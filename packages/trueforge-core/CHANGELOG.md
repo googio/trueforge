@@ -1,5 +1,11 @@
 # @truefoundry/trueforge-core
 
+## 0.179.1
+
+### Patch Changes
+
+- 5d868fc: Enable fine-grained tool streaming via TrueFoundry `anthropic-beta` header and Anthropic `toolStreaming`, and report invalid tool-arg JSON as a distinct parse error
+
 ## 0.179.0
 
 ### Patch Changes
