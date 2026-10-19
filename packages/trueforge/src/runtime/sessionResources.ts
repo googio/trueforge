@@ -14,9 +14,8 @@ import {
 import { HTTPException } from 'hono/http-exception';
 import { join } from 'node:path';
 import type { Logger } from 'winston';
-import type { RequestContext } from '../auth/identity';
 import configuration from '../config';
-import type { IMcpServerStore, IMcpServerWithAuthStore } from '../db/mcpServerStore';
+import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { ISandboxEnvironmentStore } from '../db/sandboxEnvironmentStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
@@ -35,14 +34,14 @@ import {
 import type { ReasoningEffort } from '../schemas/modelProvider';
 import { DEFAULT_SANDBOX_ENVIRONMENT_NAME } from '../schemas/sandboxEnvironment';
 import { hasConfiguredWebSearchProvider } from '../websearch/providers';
+import type { IMcpServerResolver } from './McpServerResolver';
 
 export interface GetMcpConnectionInput {
   tenant_id: string;
   name: string;
-  store: IMcpServerWithAuthStore;
+  resolver: IMcpServerResolver;
   userRef: string;
   turnMetadata?: TurnMetadata;
-  requestContext?: RequestContext;
 }
 
 /** Split `provider/model` FQN. Returns undefined when the shape is not exactly one slash. */
@@ -119,44 +118,30 @@ export async function getModelDetails({
 }
 
 /**
- * Resolve a configured MCP server for a turn.
+ * Load a configured MCP server for a turn, including the description deferred tools show.
+ * Returns undefined when unregistered.
  *
  * TODO: OAuth header resolvers re-run on every RemoteMCP listTools/callTool; cache or gate later.
  */
 export async function getMcpConnection({
   tenant_id,
   name,
-  store,
+  resolver,
   userRef,
   turnMetadata,
-  requestContext,
 }: GetMcpConnectionInput): Promise<ResolvedMcpServer | undefined> {
-  if (name === TRUEFORGE_CONNECTOR_NAME) {
-    if (requestContext === undefined) {
-      return undefined;
-    }
-    return {
-      ...trueForgeMcpEndpoint,
-      description: 'Manage resources in this TrueForge deployment.',
-      headers:
-        requestContext.user_credential === null
-          ? trueForgeMcpEndpoint.headers
-          : {
-              ...trueForgeMcpEndpoint.headers,
-              Authorization: `Bearer ${requestContext.user_credential}`,
-            },
-    };
-  }
-
-  const record = await store.getServer({ tenant_id, name });
+  const record = await resolver.getServer({ tenant_id, name });
   if (record === undefined) {
     return undefined;
   }
-  const headers = store.resolveInvokeHeaders({
+  const headers = resolver.resolveInvokeHeaders({
     record,
     userRef,
     ...(turnMetadata === undefined ? {} : { turnMetadata }),
   });
+  if (record.name === TRUEFORGE_CONNECTOR_NAME) {
+    return { ...trueForgeMcpEndpoint, headers, description: record.manifest.description };
+  }
   return {
     url: record.manifest.url,
     description: record.manifest.description,

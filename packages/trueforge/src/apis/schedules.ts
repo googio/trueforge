@@ -27,7 +27,6 @@ import {
   startScheduleRun,
 } from '../controller/scheduleDispatch';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
-import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { ISandboxEnvironmentStore } from '../db/sandboxEnvironmentStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
@@ -57,6 +56,7 @@ import {
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { minIntervalSeconds, nextTriggerAfter } from '../runtime/cron';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
+import type { IMcpServerResolver } from '../runtime/McpServerResolver';
 import {
   InvalidCronError,
   SCHEDULE_MIN_INTERVAL_SECONDS,
@@ -75,7 +75,7 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   eventSubscriptions: EventSubscriptionRegistry<TurnStreamingEvent>;
   logger: Logger;
   resolveModelProviderStore: (input: { c: Context; runAsAgent?: AgentRecord }) => IModelProviderStore<TTransaction>;
-  resolveMcpServerStore: (input: { c: Context; runAsAgent?: AgentRecord }) => IMcpServerWithAuthStore<TTransaction>;
+  resolveMcpServerResolver: (input: { c: Context; runAsAgent?: AgentRecord }) => IMcpServerResolver;
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore<TTransaction>;
   sandboxEnvironmentStore: ISandboxEnvironmentStore<TTransaction>;
   resolveWebSearchProviderStore: (c: Context) => IWebSearchProviderStore<TTransaction>;
@@ -120,7 +120,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       eventSubscriptions: deps.eventSubscriptions,
       agentStore: deps.agentStore,
       modelProviderStore: deps.resolveModelProviderStore({ c, runAsAgent: prepared.agent }),
-      mcpServerStore: deps.resolveMcpServerStore({ c, runAsAgent: prepared.agent }),
+      mcpServerStore: deps.resolveMcpServerResolver({ c, runAsAgent: prepared.agent }),
       requestContext: undefined,
       sandboxProviderStore: deps.resolveSandboxProviderStore(c),
       sandboxEnvironmentStore: deps.sandboxEnvironmentStore,
