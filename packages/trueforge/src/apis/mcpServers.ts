@@ -36,7 +36,7 @@ import {
   putMcpServerRoute,
 } from '../routes/mcpServerRoutes';
 import { findCatalogUsageConflict } from '../runtime/catalogUsage';
-import { createMcpConnectionResolver } from '../runtime/sessionResources';
+import { createMcpConnectionProvider } from '../runtime/sessionResources';
 import type {
   AvailableMcpServer,
   ConfiguredMcpServer,
@@ -466,12 +466,12 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
     const { name } = c.req.valid('param');
     const requestContext = deps.resolveRequestContext(c);
     const userRef = requestContext.subject.id;
-    const getMcpConnection = createMcpConnectionResolver({
+    const mcpConnectionProvider = createMcpConnectionProvider({
       store: deps.resolveMcpServerStore(c),
       requestContext,
     });
     // Same url + header resolution as turn execution (store Bearer, DCR, or static headers).
-    const connection = await getMcpConnection({
+    const connection = await mcpConnectionProvider.getConnection({
       tenant_id: requestContext.tenant_id,
       name,
       userRef,

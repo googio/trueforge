@@ -61,11 +61,11 @@ import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry
 import { validateSandboxFilePath } from '../runtime/sandboxFilePath';
 import {
   buildTurnSandbox,
-  createMcpConnectionResolver,
+  createMcpConnectionProvider,
   getModelDetails,
   resolveSandboxEnvironment,
   resolveSandboxProvider,
-  type GetMcpConnection,
+  type IMcpConnectionProvider,
 } from '../runtime/sessionResources';
 import { DEFAULT_SANDBOX_ENVIRONMENT_NAME } from '../schemas/sandboxEnvironment';
 import { MAX_SESSION_TITLE_LENGTH } from '../schemas/session';
@@ -145,7 +145,7 @@ export type BeginTurnExecutionDeps = Pick<
 > & {
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
-  getMcpConnection: GetMcpConnection;
+  mcpConnectionProvider: IMcpConnectionProvider;
   sandboxProviderStore: ISandboxProviderStore;
   webSearchProviderStore: IWebSearchProviderStore;
   skillStore: Pick<ISkillStore, 'resolveTurnSkills'>;
@@ -166,7 +166,7 @@ interface BeginTurnExecutionParams {
  * the same way: async factories over the corresponding stores.
  */
 function createTurnResolver(deps: {
-  getMcpConnection: GetMcpConnection;
+  mcpConnectionProvider: IMcpConnectionProvider;
   skillStore: Pick<ISkillStore, 'resolveTurnSkills'>;
   sandboxProviderStore: ISandboxProviderStore;
   sandboxEnvironmentStore: ISandboxEnvironmentStore;
@@ -180,7 +180,7 @@ function createTurnResolver(deps: {
   turnMetadata: TurnMetadata;
 }): TurnResourceResolver {
   const {
-    getMcpConnection,
+    mcpConnectionProvider,
     skillStore,
     sandboxProviderStore,
     sandboxEnvironmentStore,
@@ -215,7 +215,7 @@ function createTurnResolver(deps: {
       };
     },
     mcp: async name => {
-      const connection = await getMcpConnection({
+      const connection = await mcpConnectionProvider.getConnection({
         tenant_id,
         name,
         userRef,
@@ -444,7 +444,7 @@ export async function beginTurnExecution(
     store: deps.webSearchProviderStore,
   });
   const resolver = createTurnResolver({
-    getMcpConnection: deps.getMcpConnection,
+    mcpConnectionProvider: deps.mcpConnectionProvider,
     skillStore: deps.skillStore,
     sandboxProviderStore: deps.sandboxProviderStore,
     sandboxEnvironmentStore: deps.sandboxEnvironmentStore,
@@ -828,7 +828,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           allowInlineResources,
           ...(referencedAgent !== undefined ? { runAsAgent: referencedAgent } : {}),
         }),
-        getMcpConnection: createMcpConnectionResolver({
+        mcpConnectionProvider: createMcpConnectionProvider({
           store: deps.resolveMcpServerStore({
             c,
             allowInlineResources,

@@ -7,7 +7,7 @@ import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { mcpOAuthCallbackUrl } from '../../../src/mcp/auth/mcpOAuthHelpers';
-import { createMcpConnectionResolver, resolveMcpServer } from '../../../src/runtime/sessionResources';
+import { createMcpConnectionProvider, resolveMcpServer } from '../../../src/runtime/sessionResources';
 
 jest.mock('undici', () => {
   const actual = jest.requireActual<typeof import('undici')>('undici');
@@ -199,14 +199,14 @@ describe('resolveMcpServer', () => {
   });
 
   it('resolves the built-in trueforge MCP without a stored server', async () => {
-    const getMcpConnection = createMcpConnectionResolver({
+    const provider = createMcpConnectionProvider({
       store: mcpServerStore,
       requestContext: {
         ...STANDALONE_REQUEST_CONTEXT,
         user_credential: 'draft-token',
       },
     });
-    const connection = await getMcpConnection({
+    const connection = await provider.getConnection({
       tenant_id: 'default',
       name: 'trueforge',
       userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
@@ -218,12 +218,12 @@ describe('resolveMcpServer', () => {
   });
 
   it('does not resolve the built-in trueforge MCP without a request context', async () => {
-    const getMcpConnection = createMcpConnectionResolver({
+    const provider = createMcpConnectionProvider({
       store: mcpServerStore,
     });
 
     await expect(
-      getMcpConnection({
+      provider.getConnection({
         tenant_id: 'default',
         name: 'trueforge',
         userRef: STANDALONE_REQUEST_CONTEXT.subject.id,

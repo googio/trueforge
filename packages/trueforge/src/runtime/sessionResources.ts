@@ -43,31 +43,35 @@ export interface GetMcpConnectionInput {
   turnMetadata?: TurnMetadata;
 }
 
-export type GetMcpConnection = (input: GetMcpConnectionInput) => Promise<ResolvedMcpServer | undefined>;
+export interface IMcpConnectionProvider {
+  getConnection(input: GetMcpConnectionInput): Promise<ResolvedMcpServer | undefined>;
+}
 
 /**
- * Request-scoped MCP resolver. The built-in server is available only with a live request
+ * Request-scoped MCP connection provider. The built-in server is available only with a live request
  * context; its `null` credential is valid in standalone mode.
  */
-export function createMcpConnectionResolver(input: {
+export function createMcpConnectionProvider(input: {
   store: IMcpServerWithAuthStore;
   requestContext?: RequestContext;
-}): GetMcpConnection {
-  return async params => {
-    if (params.name === TRUEFORGE_CONNECTOR_NAME) {
-      if (input.requestContext === undefined) {
-        return undefined;
+}): IMcpConnectionProvider {
+  return {
+    getConnection: async params => {
+      if (params.name === TRUEFORGE_CONNECTOR_NAME) {
+        if (input.requestContext === undefined) {
+          return undefined;
+        }
+        return {
+          ...trueForgeMcpConnection,
+          description: 'Manage resources in this TrueForge deployment.',
+          headers:
+            input.requestContext.user_credential === null
+              ? {}
+              : { Authorization: `Bearer ${input.requestContext.user_credential}` },
+        };
       }
-      return {
-        ...trueForgeMcpConnection,
-        description: 'Manage resources in this TrueForge deployment.',
-        headers:
-          input.requestContext.user_credential === null
-            ? {}
-            : { Authorization: `Bearer ${input.requestContext.user_credential}` },
-      };
-    }
-    return resolveMcpServer({ ...params, store: input.store });
+      return resolveMcpServer({ ...params, store: input.store });
+    },
   };
 }
 
