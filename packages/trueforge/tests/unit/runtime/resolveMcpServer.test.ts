@@ -7,7 +7,6 @@ import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { mcpOAuthCallbackUrl } from '../../../src/mcp/auth/mcpOAuthHelpers';
-import { X_TFG_TRUEFORGE_MCP } from '../../../src/mcp/server/trueforge/route';
 import { getMcpConnection } from '../../../src/runtime/sessionResources';
 
 jest.mock('undici', () => {
@@ -214,7 +213,6 @@ describe('getMcpConnection', () => {
     expect(connection?.description).toBe('Manage resources in this TrueForge deployment.');
     expect(connection?.headers).toEqual({
       Authorization: 'Bearer draft-token',
-      [X_TFG_TRUEFORGE_MCP]: 'true',
     });
     expect(connection?.networkPolicy).toEqual({
       type: 'trusted-internal',
