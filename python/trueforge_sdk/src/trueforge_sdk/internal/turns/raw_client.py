@@ -99,7 +99,7 @@ class RawTurnsClient:
         self, *, request_options: typing.Optional[RequestOptions] = None
     ) -> HttpResponse[ListZombieTurnsResponse]:
         """
-        Returns all running turns with no events for 15+ minutes.
+        Returns all running turns whose last activity is past the stale threshold.
 
         Parameters
         ----------
@@ -227,7 +227,7 @@ class AsyncRawTurnsClient:
         self, *, request_options: typing.Optional[RequestOptions] = None
     ) -> AsyncHttpResponse[ListZombieTurnsResponse]:
         """
-        Returns all running turns with no events for 15+ minutes.
+        Returns all running turns whose last activity is past the stale threshold.
 
         Parameters
         ----------

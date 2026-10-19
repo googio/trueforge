@@ -4486,7 +4486,7 @@ client.internal.turns.close_zombie(
 <dl>
 <dd>
 
-Returns all running turns with no events for 15+ minutes.
+Returns all running turns whose last activity is past the stale threshold.
 </dd>
 </dl>
 </dd>

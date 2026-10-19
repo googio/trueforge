@@ -6819,7 +6819,7 @@
     },
     "/api/internal/turns/zombie": {
       "get": {
-        "description": "Returns all running turns with no events for 15+ minutes.",
+        "description": "Returns all running turns whose last activity is past the stale threshold.",
         "responses": {
           "200": {
             "content": {

@@ -130,7 +130,7 @@ export class TurnsClient {
     }
 
     /**
-     * Returns all running turns with no events for 15+ minutes.
+     * Returns all running turns whose last activity is past the stale threshold.
      *
      * @param {TurnsClient.RequestOptions} requestOptions - Request-specific configuration.
      *

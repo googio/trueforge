@@ -71,7 +71,7 @@ class TurnsClient:
 
     def list_zombie(self, *, request_options: typing.Optional[RequestOptions] = None) -> ListZombieTurnsResponse:
         """
-        Returns all running turns with no events for 15+ minutes.
+        Returns all running turns whose last activity is past the stale threshold.
 
         Parameters
         ----------
@@ -165,7 +165,7 @@ class AsyncTurnsClient:
 
     async def list_zombie(self, *, request_options: typing.Optional[RequestOptions] = None) -> ListZombieTurnsResponse:
         """
-        Returns all running turns with no events for 15+ minutes.
+        Returns all running turns whose last activity is past the stale threshold.
 
         Parameters
         ----------
