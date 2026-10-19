@@ -70,31 +70,6 @@ export function withMaxResponseBytes(fetchFn: FetchLike, maxBytes: number): Fetc
   };
 }
 
-function fetchInputUrl(input: Parameters<RemoteMcpFetch>[0]): URL {
-  return new URL(input);
-}
-
-/** Select the transport fetch while keeping internal trust exact-endpoint scoped. */
-export function fetchForMcpNetworkPolicy(params: { url: URL; policy?: RemoteMcpNetworkPolicy }): RemoteMcpFetch {
-  const policy = params.policy;
-  if (policy === undefined || policy.type === 'external') {
-    return mcpSsrfFetch;
-  }
-
-  const trustedEndpoint = new URL(policy.endpoint);
-  if (params.url.href !== trustedEndpoint.href) {
-    throw new Error(`Trusted MCP policy endpoint does not match connection URL: ${params.url.href}`);
-  }
-
-  return (input, init) => {
-    const requestUrl = fetchInputUrl(input);
-    if (requestUrl.href !== trustedEndpoint.href) {
-      throw new Error(`Trusted MCP fetch attempted an unexpected URL: ${requestUrl.href}`);
-    }
-    return policy.fetch(input, { ...init, redirect: 'manual' });
-  };
-}
-
 class McpClientWithTimeout extends Client {
   constructor(private readonly requestTimeoutMs: number) {
     super(CLIENT_INFO, { capabilities: {} });
@@ -222,13 +197,22 @@ export async function connectRemoteMcp(params: {
 }): Promise<RemoteMcpConnection> {
   const url = new URL(params.url);
   const requestOptions = { signal: params.signal };
-  const fetchFn = withMaxResponseBytes(
-    fetchForMcpNetworkPolicy({
-      url,
-      ...(params.networkPolicy === undefined ? {} : { policy: params.networkPolicy }),
-    }),
-    params.maxResponseBytes ?? DEFAULT_MAX_MCP_RESPONSE_BYTES,
-  );
+  let transportFetch: RemoteMcpFetch = mcpSsrfFetch;
+  if (params.networkPolicy?.type === 'trusted-internal') {
+    const policy = params.networkPolicy;
+    const trustedEndpoint = new URL(policy.endpoint);
+    if (url.href !== trustedEndpoint.href) {
+      throw new Error(`Trusted MCP policy endpoint does not match connection URL: ${url.href}`);
+    }
+    transportFetch = (input, init) => {
+      const requestUrl = new URL(input);
+      if (requestUrl.href !== trustedEndpoint.href) {
+        throw new Error(`Trusted MCP fetch attempted an unexpected URL: ${requestUrl.href}`);
+      }
+      return policy.fetch(input, { ...init, redirect: 'manual' });
+    };
+  }
+  const fetchFn = withMaxResponseBytes(transportFetch, params.maxResponseBytes ?? DEFAULT_MAX_MCP_RESPONSE_BYTES);
   const candidates = params.knownTransportType
     ? [params.knownTransportType, ...TRANSPORT_PROBE_ORDER.filter(t => t !== params.knownTransportType)]
     : TRANSPORT_PROBE_ORDER;

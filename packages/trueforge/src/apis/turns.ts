@@ -145,7 +145,7 @@ export type BeginTurnExecutionDeps = Pick<
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
   mcpServerStore: IMcpServerWithAuthStore;
-  requestContext?: RequestContext;
+  requestContext: RequestContext | undefined;
   sandboxProviderStore: ISandboxProviderStore;
   webSearchProviderStore: IWebSearchProviderStore;
   skillStore: Pick<ISkillStore, 'resolveTurnSkills'>;
@@ -167,7 +167,7 @@ interface BeginTurnExecutionParams {
  */
 function createTurnResolver(deps: {
   mcpServerStore: IMcpServerWithAuthStore;
-  requestContext?: RequestContext;
+  requestContext: RequestContext | undefined;
   skillStore: Pick<ISkillStore, 'resolveTurnSkills'>;
   sandboxProviderStore: ISandboxProviderStore;
   sandboxEnvironmentStore: ISandboxEnvironmentStore;
@@ -449,7 +449,7 @@ export async function beginTurnExecution(
   });
   const resolver = createTurnResolver({
     mcpServerStore: deps.mcpServerStore,
-    ...(deps.requestContext === undefined ? {} : { requestContext: deps.requestContext }),
+    requestContext: deps.requestContext,
     skillStore: deps.skillStore,
     sandboxProviderStore: deps.sandboxProviderStore,
     sandboxEnvironmentStore: deps.sandboxEnvironmentStore,

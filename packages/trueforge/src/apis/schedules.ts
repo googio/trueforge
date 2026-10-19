@@ -121,6 +121,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       agentStore: deps.agentStore,
       modelProviderStore: deps.resolveModelProviderStore({ c, runAsAgent: prepared.agent }),
       mcpServerStore: deps.resolveMcpServerStore({ c, runAsAgent: prepared.agent }),
+      requestContext: undefined,
       sandboxProviderStore: deps.resolveSandboxProviderStore(c),
       sandboxEnvironmentStore: deps.sandboxEnvironmentStore,
       webSearchProviderStore: deps.resolveWebSearchProviderStore(c),
