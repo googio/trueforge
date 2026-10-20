@@ -226,10 +226,7 @@ function createTurnResolver(deps: {
           message: `Unknown MCP server "${name}" — not configured`,
         });
       }
-      return {
-        url: connection.url,
-        headers: connection.headers,
-      };
+      return connection;
     },
     mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
     mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,

@@ -6,7 +6,7 @@ import {
   type AgentTracing,
   type DaytonaSandboxEnvironment,
   type ModelParams,
-  type RemoteMcpHeaders,
+  type ResolvedMcpServer,
   type SandboxProvider,
   type Skill,
   type VercelAIProviderConfig,
@@ -32,11 +32,6 @@ import {
 import type { ReasoningEffort } from '../schemas/modelProvider';
 import { DEFAULT_SANDBOX_ENVIRONMENT_NAME } from '../schemas/sandboxEnvironment';
 import { hasConfiguredWebSearchProvider } from '../websearch/providers';
-
-export interface McpConnection {
-  url: string;
-  headers: RemoteMcpHeaders;
-}
 
 /** Split `provider/model` FQN. Returns undefined when the shape is not exactly one slash. */
 export function parseModelFqn(name: string): { providerName: string; modelName: string } | undefined {
@@ -112,7 +107,7 @@ export async function getModelDetails({
 }
 
 /**
- * Load MCP url + headers for a configured server. Returns undefined when unregistered.
+ * Load MCP for a configured server. Returns undefined when unregistered.
  *
  * TODO: OAuth header resolvers re-run on every RemoteMCP listTools/callTool; cache or gate later.
  */
@@ -128,13 +123,14 @@ export async function getMcpConnection({
   store: IMcpServerWithAuthStore;
   userRef: string;
   turnMetadata?: TurnMetadata;
-}): Promise<McpConnection | undefined> {
+}): Promise<ResolvedMcpServer | undefined> {
   const record = await store.getServer({ tenant_id, name });
   if (record === undefined) {
     return undefined;
   }
   return {
     url: record.manifest.url,
+    description: record.manifest.description,
     headers: store.resolveInvokeHeaders({
       record,
       userRef,
