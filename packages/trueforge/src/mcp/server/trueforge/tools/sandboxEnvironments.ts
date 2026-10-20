@@ -28,7 +28,9 @@ export function registerSandboxEnvironmentTools(server: McpServer, client: TrueF
       description:
         'Create a reusable sandbox environment that agents run in — defining its resources, environment ' +
         'variables, networking, and build configuration — from a complete manifest. Fails if an environment ' +
-        'with the same name already exists; the reserved `default` environment cannot be created.',
+        'with the same name already exists; the reserved `default` environment cannot be created. ' +
+        'Never ask the user for a secret value and never send networking.secrets. When the environment needs ' +
+        'secrets, ask the user to create them in the sandbox environment settings.',
       inputSchema: { manifest: SandboxEnvironmentManifestRequestSchema },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     },
@@ -48,7 +50,8 @@ export function registerSandboxEnvironmentTools(server: McpServer, client: TrueF
     {
       description:
         'Discover existing sandbox environments you can reference from an agent, or find one to update. ' +
-        "Returns one paginated page; environment values and secrets follow the HTTP API's redaction behavior.",
+        'Returns one paginated page. Secret values are redacted; never ask the user for them. When an ' +
+        'environment needs secrets, ask the user to create them in the sandbox environment settings.',
       inputSchema: {
         page_size: z.number().int().positive().optional(),
         page_token: z.string().optional(),
@@ -70,7 +73,9 @@ export function registerSandboxEnvironmentTools(server: McpServer, client: TrueF
     {
       description:
         'Fetch one sandbox environment by name — its manifest, build status, resources, environment ' +
-        'variables, and networking configuration. Use it to review an environment or get a template before updating it.',
+        'variables, and networking configuration. Use it to review an environment or get a template before updating it. ' +
+        'Secret values are redacted; never ask the user for them. When the environment needs secrets, ask the user ' +
+        'to create them in the sandbox environment settings.',
       inputSchema: { name: z.string() },
       annotations: { readOnlyHint: true },
     },
@@ -83,7 +88,10 @@ export function registerSandboxEnvironmentTools(server: McpServer, client: TrueF
       description:
         'Change an existing sandbox environment — the resources, environment variables, networking, and build ' +
         'configuration agents run in — by replacing it with a complete manifest. The input name and manifest ' +
-        'name must match, and this tool never creates a missing environment (use create_sandbox_environment for that).',
+        'name must match, and this tool never creates a missing environment (use create_sandbox_environment for that). ' +
+        'Never ask the user for a secret value and never send networking.secrets; keep any redacted secret ' +
+        'placeholders returned by get_sandbox_environment. When the environment needs secrets, ask the user to ' +
+        'create them in the sandbox environment settings.',
       inputSchema: { name: z.string(), manifest: SandboxEnvironmentManifestRequestSchema },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     },
