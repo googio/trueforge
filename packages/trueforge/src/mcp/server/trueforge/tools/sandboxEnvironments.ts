@@ -1,8 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { TrueForgeError, type TrueForge } from '@truefoundry/trueforge-sdk';
+import type { TrueForge } from '@truefoundry/trueforge-sdk';
 import { z } from 'zod';
 import { SandboxEnvironmentManifestRequestSchema } from '../../../../schemas/sandboxEnvironment';
-import { runTool } from '../result';
+import { isSdkRequestError, runTool, ToolResultError } from '../result';
 
 /**
  * The HTTP API exposes a single create-or-update PUT. We split create and update over it and add a
@@ -14,7 +14,7 @@ async function environmentExists(client: TrueForge, name: string): Promise<boole
     await client.sandboxEnvironments.get(name);
     return true;
   } catch (error) {
-    if (error instanceof TrueForgeError && error.statusCode === 404) {
+    if (isSdkRequestError(error) && error.statusCode === 404) {
       return false;
     }
     throw error;
@@ -35,10 +35,7 @@ export function registerSandboxEnvironmentTools(server: McpServer, client: TrueF
     async ({ manifest }) =>
       runTool(async () => {
         if (await environmentExists(client, manifest.name)) {
-          throw new TrueForgeError({
-            statusCode: 409,
-            body: { error: { message: `Sandbox environment already exists: ${manifest.name}` } },
-          });
+          throw new ToolResultError(409, `Sandbox environment already exists: ${manifest.name}`);
         }
         return client.sandboxEnvironments.createOrUpdate({ manifest } as unknown as Parameters<
           typeof client.sandboxEnvironments.createOrUpdate
@@ -93,16 +90,10 @@ export function registerSandboxEnvironmentTools(server: McpServer, client: TrueF
     async ({ name, manifest }) =>
       runTool(async () => {
         if (name !== manifest.name) {
-          throw new TrueForgeError({
-            statusCode: 400,
-            body: { error: { message: 'input name and manifest.name must match' } },
-          });
+          throw new ToolResultError(400, 'input name and manifest.name must match');
         }
         if (!(await environmentExists(client, name))) {
-          throw new TrueForgeError({
-            statusCode: 404,
-            body: { error: { message: `Sandbox environment not found: ${name}` } },
-          });
+          throw new ToolResultError(404, `Sandbox environment not found: ${name}`);
         }
         return client.sandboxEnvironments.createOrUpdate({ manifest } as unknown as Parameters<
           typeof client.sandboxEnvironments.createOrUpdate

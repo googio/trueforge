@@ -1,10 +1,27 @@
 /** Shared success/error shaping for TrueForge tool results. */
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { TrueForgeError } from '@truefoundry/trueforge-sdk';
 
 interface SafeToolError {
   status: number | null;
   message: string;
+}
+
+interface SdkRequestError {
+  statusCode?: number;
+  body?: unknown;
+}
+
+/** Local failure with the same status and body shape as an SDK error. */
+export class ToolResultError extends Error implements SdkRequestError {
+  readonly statusCode: number;
+  readonly body: { error: { message: string } };
+
+  constructor(statusCode: number, message: string) {
+    super(message);
+    this.name = 'ToolResultError';
+    this.statusCode = statusCode;
+    this.body = { error: { message } };
+  }
 }
 
 const FALLBACK_MESSAGE = 'The TrueForge API request failed.';
@@ -23,9 +40,17 @@ function messageFromBody(body: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * The generated SDK re-exports these classes with `export *`. tsx loads that package as CommonJS
+ * in dev, where those names are not visible, so identify the errors by the name the SDK sets.
+ */
+export function isSdkRequestError(error: unknown): error is SdkRequestError {
+  return error instanceof Error && (error.name === 'TrueForgeError' || error.name === 'TrueForgeTimeoutError');
+}
+
 /** Convert SDK/API failures into a compact, secret-free shape for MCP tool results. */
 function toSafeToolError(error: unknown): SafeToolError {
-  if (error instanceof TrueForgeError) {
+  if (error instanceof ToolResultError || isSdkRequestError(error)) {
     return {
       status: error.statusCode ?? null,
       message: messageFromBody(error.body) ?? FALLBACK_MESSAGE,
