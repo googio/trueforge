@@ -138,6 +138,11 @@ export function createTrueForgeMcpRouter(deps: TrueForgeMcpRouterDeps): Hono {
     if (c.req.header(TRUEFORGE_CLIENT_HEADER) !== TRUEFORGE_BROWSER_CLIENT) {
       return c.json({ error: { message: 'TrueForge MCP is available only to browser draft sessions' } }, 403);
     }
+    // No standalone event stream. 405 tells the client this server has nothing to listen for.
+    if (c.req.method === 'GET') {
+      c.header('Allow', 'POST, DELETE');
+      return c.body(null, 405);
+    }
     const requestContext = deps.resolveRequestContext(c);
 
     // Built per request: the server's tools close over this caller's credential, and stateless

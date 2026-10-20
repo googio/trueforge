@@ -41,11 +41,12 @@ function messageFromBody(body: unknown): string | undefined {
 }
 
 /**
- * The generated SDK re-exports these classes with `export *`. tsx loads that package as CommonJS
- * in dev, where those names are not visible, so identify the errors by the name the SDK sets.
+ * The generated SDK re-exports its error classes with `export *`. tsx loads that package as CommonJS
+ * in dev, where those names are not visible, so match by shape. Status subclasses rename themselves
+ * (`NotFoundError`, `ConflictError`, ...), so `name` cannot identify them.
  */
 export function isSdkRequestError(error: unknown): error is SdkRequestError {
-  return error instanceof Error && (error.name === 'TrueForgeError' || error.name === 'TrueForgeTimeoutError');
+  return error instanceof Error && 'statusCode' in error && 'body' in error;
 }
 
 /** Convert SDK/API failures into a compact, secret-free shape for MCP tool results. */
