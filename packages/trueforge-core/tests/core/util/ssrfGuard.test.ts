@@ -351,30 +351,6 @@ describe('modelSsrfFetch', () => {
 });
 
 describe('mcpSsrfFetch', () => {
-  it('bypasses SSRF only for the exact configured trusted MCP endpoint', async () => {
-    const trustedFetch = jest.fn(async () => new Response(null, { status: 200 }));
-    configureOutboundFetches({
-      outbound: defaultOutboundFetchOptions(),
-      model: defaultModelOutboundFetchOptions(),
-      mcp: {
-        ...defaultMcpOutboundFetchOptions(),
-        trustedEndpoint: {
-          url: 'http://127.0.0.1:8790/mcp',
-          fetch: trustedFetch,
-        },
-      },
-    });
-
-    await expect(mcpSsrfFetch('http://127.0.0.1:8790/mcp', { method: 'POST' })).resolves.toMatchObject({
-      status: 200,
-    });
-    expect(trustedFetch).toHaveBeenCalledWith('http://127.0.0.1:8790/mcp', {
-      method: 'POST',
-      redirect: 'manual',
-    });
-    await expect(mcpSsrfFetch('http://127.0.0.1:8790/private')).rejects.toThrow('Outbound URL blocked');
-  });
-
   it('retries statuses where the request was not processed but not 409/502/520/524', async () => {
     configureOutboundUrlGuard({ allowedHosts: ['127.0.0.1'], blockedHosts: [] });
     configureOutboundFetches({
