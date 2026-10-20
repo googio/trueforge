@@ -448,6 +448,7 @@ describe('TurnResourceResolver caches', () => {
           return new RemoteMCP({
             id: 'svc',
             name: 'svc',
+            description: 'Example MCP server.',
             url: 'http://example.invalid',
             headers: {},
             logger,
