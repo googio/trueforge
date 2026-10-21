@@ -615,7 +615,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     }
     const allowed = await canReadSession({
       session_id: sessionId,
-      shared: session.record.shared,
       accessStore: deps.accessControlEntryStore,
       store: deps.resolveAgentStore(c),
       context: requestContext,
@@ -652,7 +651,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     }
     const allowed = await canReadSession({
       session_id: sessionId,
-      shared: session.record.shared,
       accessStore: deps.accessControlEntryStore,
       store: deps.resolveAgentStore(c),
       context: requestContext,
@@ -752,7 +750,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     }
     const allowed = await canReadSession({
       session_id: sessionId,
-      shared: session.record.shared,
       accessStore: deps.accessControlEntryStore,
       store: deps.resolveAgentStore(c),
       context: requestContext,

@@ -28,6 +28,7 @@ import type { Database } from '../../../src/db/sqlite/types';
 import { SqliteWebSearchProviderStore } from '../../../src/db/sqlite/web-search-provider-store/SqliteWebSearchProviderStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
+import { GetSessionResponseSchema, ListSessionsResponseSchema } from '../../../src/schemas/session';
 import { ListSessionAccessResponseSchema } from '../../../src/schemas/sessionAccess';
 import type { DirectoryUser } from '../../../src/schemas/user';
 
@@ -282,7 +283,7 @@ describe('session access API', () => {
           subjects: Array.from({ length: 101 }, (_, i) => ({ subject_type: 'user', subject_id: `u${String(i)}` })),
         },
       ],
-      ['an unsupported subject type', { subjects: [{ subject_type: 'tenant', subject_id: 'default' }] }],
+      ['an unsupported subject type', { subjects: [{ subject_type: 'team', subject_id: 'platform' }] }],
     ])('rejects %s', async (_label, body) => {
       const response = await app.request(`/${SESSION_ID}/access`, jsonInit('POST', body));
       expect(response.status).toBe(400);
@@ -322,7 +323,97 @@ describe('session access API', () => {
     });
 
     it('rejects an unsupported subject type', async () => {
-      expect((await app.request(`/${SESSION_ID}/access/tenant/default`, asCaller('owner', 'DELETE'))).status).toBe(400);
+      expect((await app.request(`/${SESSION_ID}/access/team/platform`, asCaller('owner', 'DELETE'))).status).toBe(400);
+    });
+  });
+
+  describe('tenant subject', () => {
+    async function shareWithTenant(subjectId = TENANT): Promise<Response> {
+      return app.request(
+        `/${SESSION_ID}/access`,
+        jsonInit('POST', { subjects: [{ subject_type: 'tenant', subject_id: subjectId }] }),
+      );
+    }
+
+    async function sessionShared(): Promise<boolean> {
+      const response = await app.request(`/${SESSION_ID}`, asCaller('owner'));
+      return GetSessionResponseSchema.parse(await response.json()).data.shared;
+    }
+
+    it('shares with everyone, works without a user directory, and lists with null details', async () => {
+      app = buildApp({ db, sessionStore, userDirectory: new EmptyUserDirectory() });
+
+      const response = await shareWithTenant();
+
+      expect(response.status).toBe(201);
+      expect(ListSessionAccessResponseSchema.parse(await response.json()).data).toEqual([
+        expect.objectContaining({
+          subject_type: 'tenant',
+          subject_id: TENANT,
+          subject_display_name: null,
+          subject_email: null,
+        }),
+      ]);
+      expect(await sessionShared()).toBe(true);
+      expect((await app.request(`/${SESSION_ID}`, asCaller('anyone'))).status).toBe(200);
+    });
+
+    it('rejects a tenant subject for another tenant', async () => {
+      const response = await shareWithTenant('other-tenant');
+
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({
+        error: { message: 'A tenant subject must use the tenant id of the caller.' },
+      });
+      expect(await listGrants()).toEqual([]);
+    });
+
+    it('stops sharing with everyone once the tenant grant is revoked', async () => {
+      expect((await shareWithTenant()).status).toBe(201);
+
+      const response = await app.request(`/${SESSION_ID}/access/tenant/${TENANT}`, asCaller('owner', 'DELETE'));
+
+      expect(response.status).toBe(200);
+      expect(await sessionShared()).toBe(false);
+      expect((await app.request(`/${SESSION_ID}`, asCaller('anyone'))).status).toBe(403);
+    });
+
+    it('treats PATCH { shared } as an alias for the tenant grant', async () => {
+      const shared = await app.request(`/${SESSION_ID}`, jsonInit('PATCH', { shared: true }));
+      expect(shared.status).toBe(200);
+      expect(GetSessionResponseSchema.parse(await shared.json()).data.shared).toBe(true);
+      expect(await listGrants()).toEqual([TENANT]);
+      expect((await app.request(`/${SESSION_ID}`, asCaller('anyone'))).status).toBe(200);
+
+      const unshared = await app.request(`/${SESSION_ID}`, jsonInit('PATCH', { shared: false }));
+      expect(unshared.status).toBe(200);
+      expect(GetSessionResponseSchema.parse(await unshared.json()).data.shared).toBe(false);
+      expect(await listGrants()).toEqual([]);
+      expect((await app.request(`/${SESSION_ID}`, asCaller('anyone'))).status).toBe(403);
+    });
+
+    it('ignores the legacy session.shared column', async () => {
+      await sessionStore.updateSession({
+        tenant_id: TENANT,
+        session_id: SESSION_ID,
+        agent: undefined,
+        title: undefined,
+        metadata: undefined,
+        shared: true,
+      });
+
+      expect(await sessionShared()).toBe(false);
+      expect((await app.request(`/${SESSION_ID}`, asCaller('anyone'))).status).toBe(403);
+    });
+
+    it('reports shared on listed sessions', async () => {
+      expect((await shareWithTenant()).status).toBe(201);
+
+      const response = await app.request('/', asCaller('owner'));
+
+      expect(ListSessionsResponseSchema.parse(await response.json()).data).toEqual([
+        expect.objectContaining({ id: SESSION_ID, shared: true }),
+      ]);
     });
   });
 

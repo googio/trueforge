@@ -307,13 +307,12 @@ describe('turns', () => {
         external_id: null,
         source: null,
       });
-      await sessionStore.updateSession({
+      const accessControlEntryStore = new SqliteAccessControlEntryStore(db);
+      await accessControlEntryStore.grantSessionAccess({
         tenant_id: 'default',
         session_id: 'shared-session',
-        agent: undefined,
-        title: undefined,
-        metadata: undefined,
-        shared: true,
+        subjects: [{ subject_type: 'tenant', subject_id: 'default' }],
+        granted_by_subject: { subject_id: 'someone-else', subject_type: 'user', subject_display_name: 'someone-else' },
       });
 
       const app = new OpenAPIHono();
@@ -322,7 +321,7 @@ describe('turns', () => {
         createTurnsRouter({
           sessions: new Sessions({ sessionStore }),
           sessionStore,
-          accessControlEntryStore: new SqliteAccessControlEntryStore(db),
+          accessControlEntryStore,
           activeTurns: new ActiveTurnRegistry(),
           resolveModelProviderStore: () => new SqliteModelProviderStore(db),
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, new SqliteOAuthTokenStore(db)),

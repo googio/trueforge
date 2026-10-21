@@ -100,13 +100,12 @@ export async function canReadAgentBoundResource<TTransaction>(input: {
 
 /**
  * Session conversation reads (get session, list events/turns): readable by the creator,
- * managers of the bound named agent, everyone in the tenant when shared, and users with
- * an explicit grant; mutations, subscribe, and sandbox downloads stay creator-only.
- * Checks run cheapest first so the remote agent-permission lookup is the last resort.
+ * managers of the bound named agent, and anyone holding a grant (their own `user` grant, or
+ * a `tenant` grant when shared with everyone); mutations, subscribe, and sandbox downloads
+ * stay creator-only. Checks run cheapest first so the remote agent-permission lookup is last.
  */
 export async function canReadSession<TTransaction>(input: {
   session_id: string;
-  shared: boolean;
   created_by_subject_id: string;
   agent_id: string | undefined;
   accessStore: IAccessControlEntryStore<TTransaction>;
@@ -115,10 +114,10 @@ export async function canReadSession<TTransaction>(input: {
   authorizer: Authorizer;
 }): Promise<boolean> {
   const { context } = input;
-  if (input.shared || input.created_by_subject_id === context.subject.id) {
+  if (input.created_by_subject_id === context.subject.id) {
     return true;
   }
-  const granted = await input.accessStore.hasUserAccess({
+  const granted = await input.accessStore.hasAccess({
     tenant_id: context.tenant_id,
     session_id: input.session_id,
     subject_id: context.subject.id,

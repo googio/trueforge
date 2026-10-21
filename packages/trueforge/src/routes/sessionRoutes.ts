@@ -177,7 +177,7 @@ export const updateSessionRoute = createRoute({
   tags: [OpenApiTag.AGENT_SESSIONS],
   summary: 'Update a session',
   description:
-    'Update a session: optional `title`, `metadata`, `shared`, and (inline sessions only) `agent` as `{ spec: AgentSpec }`. Named sessions reject agent updates. An empty body is a valid no-op that refreshes `updated_at`. Only the session creator may update it.',
+    'Update a session: optional `title`, `metadata`, `shared` (deprecated; use the access endpoints), and (inline sessions only) `agent` as `{ spec: AgentSpec }`. Named sessions reject agent updates. An empty body is a valid no-op that refreshes `updated_at`. Only the session creator may update it.',
   'x-fern-sdk-group-name': ['sessions'],
   'x-fern-sdk-method-name': 'update',
   request: {
@@ -311,7 +311,8 @@ export const listSessionAccessRoute = createRoute({
   path: '/{session_id}/access',
   tags: [OpenApiTag.AGENT_SESSIONS],
   summary: 'List session access',
-  description: 'List the users this session is shared with. Only the session creator may call this.',
+  description:
+    'List who this session is shared with: individual users, plus the tenant when it is shared with everyone. Only the session creator may call this.',
   'x-fern-sdk-group-name': ['sessions'],
   'x-fern-sdk-method-name': 'list_access',
   request: {
@@ -320,7 +321,7 @@ export const listSessionAccessRoute = createRoute({
   responses: {
     200: {
       content: { 'application/json': { schema: ListSessionAccessResponseSchema } },
-      description: 'Users the session is shared with.',
+      description: 'Grants on the session.',
     },
     403: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
@@ -339,7 +340,7 @@ export const createSessionAccessRoute = createRoute({
   tags: [OpenApiTag.AGENT_SESSIONS],
   summary: 'Share a session',
   description:
-    'Share this session with users. Existing grants are left unchanged. Only the session creator may call this.',
+    'Share this session with users, or with everyone in the tenant through a `tenant` subject. Existing grants are left unchanged. Only the session creator may call this.',
   'x-fern-sdk-group-name': ['sessions'],
   'x-fern-sdk-method-name': 'create_access',
   request: {
@@ -368,7 +369,7 @@ export const createSessionAccessRoute = createRoute({
     },
     422: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'A subject is unknown or is the session creator.',
+      description: 'A user is unknown or is the session creator, or a tenant subject names another tenant.',
     },
   },
 });
@@ -378,7 +379,7 @@ export const deleteSessionAccessRoute = createRoute({
   path: '/{session_id}/access/{subject_type}/{subject_id}',
   tags: [OpenApiTag.AGENT_SESSIONS],
   summary: 'Revoke session access',
-  description: "Revoke one user's access to this session. Only the session creator may call this.",
+  description: 'Revoke one grant on this session. Only the session creator may call this.',
   'x-fern-sdk-group-name': ['sessions'],
   'x-fern-sdk-method-name': 'delete_access',
   request: {
