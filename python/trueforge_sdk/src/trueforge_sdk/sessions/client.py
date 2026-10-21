@@ -10,8 +10,10 @@ from ..core.stream import AsyncStream, Stream, StreamEvent
 from ..types.cancel_session_response import CancelSessionResponse
 from ..types.create_session_agent import CreateSessionAgent
 from ..types.create_turn_event_response import CreateTurnEventResponse
+from ..types.delete_session_access_response import DeleteSessionAccessResponse
 from ..types.get_session_response import GetSessionResponse
 from ..types.get_turn_response import GetTurnResponse
+from ..types.list_session_access_response import ListSessionAccessResponse
 from ..types.list_session_events_response import ListSessionEventsResponse
 from ..types.list_sessions_order import ListSessionsOrder
 from ..types.list_sessions_response import ListSessionsResponse
@@ -20,6 +22,7 @@ from ..types.list_turn_events_response import ListTurnEventsResponse
 from ..types.list_turns_response import ListTurnsResponse
 from ..types.previous_turn_id_input import PreviousTurnIdInput
 from ..types.session import Session
+from ..types.session_access_subject import SessionAccessSubject
 from ..types.session_agent_spec_body import SessionAgentSpecBody
 from ..types.session_event import SessionEvent
 from ..types.session_event_item import SessionEventItem
@@ -296,6 +299,128 @@ class SessionsClient:
             shared=shared,
             title=title,
             request_options=request_options,
+        )
+        return _response.data
+
+    def list_access(
+        self, *, session_id: str, request_options: typing.Optional[RequestOptions] = None
+    ) -> ListSessionAccessResponse:
+        """
+        List the users this session is shared with. Only the session creator may call this.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier.
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        ListSessionAccessResponse
+            Users the session is shared with.
+
+        Examples
+        --------
+        from trueforge_sdk import TrueForge
+
+        client = TrueForge(
+            token="YOUR_TOKEN",
+            base_url="https://yourhost.com/path/to/api",
+        )
+        client.sessions.list_access(
+            session_id="session_id",
+        )
+        """
+        _response = self._raw_client.list_access(session_id=session_id, request_options=request_options)
+        return _response.data
+
+    def create_access(
+        self,
+        *,
+        session_id: str,
+        subjects: typing.Sequence[SessionAccessSubject],
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> ListSessionAccessResponse:
+        """
+        Share this session with users. Existing grants are left unchanged. Only the session creator may call this.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier.
+
+        subjects : typing.Sequence[SessionAccessSubject]
+            Subjects to share the session with (1–100).
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        ListSessionAccessResponse
+            All grants on the session after the write.
+
+        Examples
+        --------
+        from trueforge_sdk import SessionAccessSubject, TrueForge
+
+        client = TrueForge(
+            token="YOUR_TOKEN",
+            base_url="https://yourhost.com/path/to/api",
+        )
+        client.sessions.create_access(
+            session_id="session_id",
+            subjects=[
+                SessionAccessSubject(
+                    subject_id="subject_id",
+                )
+            ],
+        )
+        """
+        _response = self._raw_client.create_access(
+            session_id=session_id, subjects=subjects, request_options=request_options
+        )
+        return _response.data
+
+    def delete_access(
+        self, *, session_id: str, subject_id: str, request_options: typing.Optional[RequestOptions] = None
+    ) -> DeleteSessionAccessResponse:
+        """
+        Revoke one user's access to this session. Only the session creator may call this.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier.
+
+        subject_id : str
+            Subject identifier, as returned by `GET /api/v1/users`.
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        DeleteSessionAccessResponse
+            Access revoked.
+
+        Examples
+        --------
+        from trueforge_sdk import TrueForge
+
+        client = TrueForge(
+            token="YOUR_TOKEN",
+            base_url="https://yourhost.com/path/to/api",
+        )
+        client.sessions.delete_access(
+            session_id="session_id",
+            subject_id="subject_id",
+        )
+        """
+        _response = self._raw_client.delete_access(
+            session_id=session_id, subject_id=subject_id, request_options=request_options
         )
         return _response.data
 
@@ -1107,6 +1232,152 @@ class AsyncSessionsClient:
             shared=shared,
             title=title,
             request_options=request_options,
+        )
+        return _response.data
+
+    async def list_access(
+        self, *, session_id: str, request_options: typing.Optional[RequestOptions] = None
+    ) -> ListSessionAccessResponse:
+        """
+        List the users this session is shared with. Only the session creator may call this.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier.
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        ListSessionAccessResponse
+            Users the session is shared with.
+
+        Examples
+        --------
+        import asyncio
+
+        from trueforge_sdk import AsyncTrueForge
+
+        client = AsyncTrueForge(
+            token="YOUR_TOKEN",
+            base_url="https://yourhost.com/path/to/api",
+        )
+
+
+        async def main() -> None:
+            await client.sessions.list_access(
+                session_id="session_id",
+            )
+
+
+        asyncio.run(main())
+        """
+        _response = await self._raw_client.list_access(session_id=session_id, request_options=request_options)
+        return _response.data
+
+    async def create_access(
+        self,
+        *,
+        session_id: str,
+        subjects: typing.Sequence[SessionAccessSubject],
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> ListSessionAccessResponse:
+        """
+        Share this session with users. Existing grants are left unchanged. Only the session creator may call this.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier.
+
+        subjects : typing.Sequence[SessionAccessSubject]
+            Subjects to share the session with (1–100).
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        ListSessionAccessResponse
+            All grants on the session after the write.
+
+        Examples
+        --------
+        import asyncio
+
+        from trueforge_sdk import AsyncTrueForge, SessionAccessSubject
+
+        client = AsyncTrueForge(
+            token="YOUR_TOKEN",
+            base_url="https://yourhost.com/path/to/api",
+        )
+
+
+        async def main() -> None:
+            await client.sessions.create_access(
+                session_id="session_id",
+                subjects=[
+                    SessionAccessSubject(
+                        subject_id="subject_id",
+                    )
+                ],
+            )
+
+
+        asyncio.run(main())
+        """
+        _response = await self._raw_client.create_access(
+            session_id=session_id, subjects=subjects, request_options=request_options
+        )
+        return _response.data
+
+    async def delete_access(
+        self, *, session_id: str, subject_id: str, request_options: typing.Optional[RequestOptions] = None
+    ) -> DeleteSessionAccessResponse:
+        """
+        Revoke one user's access to this session. Only the session creator may call this.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier.
+
+        subject_id : str
+            Subject identifier, as returned by `GET /api/v1/users`.
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        DeleteSessionAccessResponse
+            Access revoked.
+
+        Examples
+        --------
+        import asyncio
+
+        from trueforge_sdk import AsyncTrueForge
+
+        client = AsyncTrueForge(
+            token="YOUR_TOKEN",
+            base_url="https://yourhost.com/path/to/api",
+        )
+
+
+        async def main() -> None:
+            await client.sessions.delete_access(
+                session_id="session_id",
+                subject_id="subject_id",
+            )
+
+
+        asyncio.run(main())
+        """
+        _response = await self._raw_client.delete_access(
+            session_id=session_id, subject_id=subject_id, request_options=request_options
         )
         return _response.data
 
