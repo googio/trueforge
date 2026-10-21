@@ -23,6 +23,7 @@ from ..types.list_turns_response import ListTurnsResponse
 from ..types.previous_turn_id_input import PreviousTurnIdInput
 from ..types.session import Session
 from ..types.session_access_subject import SessionAccessSubject
+from ..types.session_access_subject_type import SessionAccessSubjectType
 from ..types.session_agent_spec_body import SessionAgentSpecBody
 from ..types.session_event import SessionEvent
 from ..types.session_event_item import SessionEventItem
@@ -255,7 +256,7 @@ class SessionsClient:
         request_options: typing.Optional[RequestOptions] = None,
     ) -> GetSessionResponse:
         """
-        Update a session: optional `title`, `metadata`, `shared`, and (inline sessions only) `agent` as `{ spec: AgentSpec }`. Named sessions reject agent updates. An empty body is a valid no-op that refreshes `updated_at`. Only the session creator may update it.
+        Update a session: optional `title`, `metadata`, `shared` (deprecated; use the access endpoints), and (inline sessions only) `agent` as `{ spec: AgentSpec }`. Named sessions reject agent updates. An empty body is a valid no-op that refreshes `updated_at`. Only the session creator may update it.
 
         Parameters
         ----------
@@ -267,7 +268,7 @@ class SessionsClient:
         metadata : typing.Optional[SessionMetadata]
 
         shared : typing.Optional[bool]
-            When true, any subject in the tenant may read this session and its turns/events by id.
+            Deprecated: share through `POST /sessions/{session_id}/access` with a `tenant` subject. When true, anyone in the tenant may read this session by id.
 
         title : typing.Optional[str]
             Human-readable session title.
@@ -306,7 +307,7 @@ class SessionsClient:
         self, *, session_id: str, request_options: typing.Optional[RequestOptions] = None
     ) -> ListSessionAccessResponse:
         """
-        List the users this session is shared with. Only the session creator may call this.
+        List who this session is shared with: individual users, plus the tenant when it is shared with everyone. Only the session creator may call this.
 
         Parameters
         ----------
@@ -319,7 +320,7 @@ class SessionsClient:
         Returns
         -------
         ListSessionAccessResponse
-            Users the session is shared with.
+            Grants on the session.
 
         Examples
         --------
@@ -344,7 +345,7 @@ class SessionsClient:
         request_options: typing.Optional[RequestOptions] = None,
     ) -> ListSessionAccessResponse:
         """
-        Share this session with users. Existing grants are left unchanged. Only the session creator may call this.
+        Share this session with users, or with everyone in the tenant through a `tenant` subject. Existing grants are left unchanged. Only the session creator may call this.
 
         Parameters
         ----------
@@ -364,7 +365,11 @@ class SessionsClient:
 
         Examples
         --------
-        from trueforge_sdk import SessionAccessSubject, TrueForge
+        from trueforge_sdk import (
+            SessionAccessSubject,
+            SessionAccessSubjectType,
+            TrueForge,
+        )
 
         client = TrueForge(
             token="YOUR_TOKEN",
@@ -375,6 +380,7 @@ class SessionsClient:
             subjects=[
                 SessionAccessSubject(
                     subject_id="subject_id",
+                    subject_type=SessionAccessSubjectType.USER,
                 )
             ],
         )
@@ -385,18 +391,26 @@ class SessionsClient:
         return _response.data
 
     def delete_access(
-        self, *, session_id: str, subject_id: str, request_options: typing.Optional[RequestOptions] = None
+        self,
+        *,
+        session_id: str,
+        subject_type: SessionAccessSubjectType,
+        subject_id: str,
+        request_options: typing.Optional[RequestOptions] = None,
     ) -> DeleteSessionAccessResponse:
         """
-        Revoke one user's access to this session. Only the session creator may call this.
+        Revoke one grant on this session. Only the session creator may call this.
 
         Parameters
         ----------
         session_id : str
             Session identifier.
 
+        subject_type : SessionAccessSubjectType
+            Kind of subject the session is shared with. `tenant` shares it with everyone in the tenant.
+
         subject_id : str
-            Subject identifier, as returned by `GET /api/v1/users`.
+            A user id from `GET /api/v1/users`, or the tenant id of the caller for a `tenant` subject.
 
         request_options : typing.Optional[RequestOptions]
             Request-specific configuration.
@@ -408,7 +422,7 @@ class SessionsClient:
 
         Examples
         --------
-        from trueforge_sdk import TrueForge
+        from trueforge_sdk import SessionAccessSubjectType, TrueForge
 
         client = TrueForge(
             token="YOUR_TOKEN",
@@ -416,11 +430,12 @@ class SessionsClient:
         )
         client.sessions.delete_access(
             session_id="session_id",
+            subject_type=SessionAccessSubjectType.USER,
             subject_id="subject_id",
         )
         """
         _response = self._raw_client.delete_access(
-            session_id=session_id, subject_id=subject_id, request_options=request_options
+            session_id=session_id, subject_type=subject_type, subject_id=subject_id, request_options=request_options
         )
         return _response.data
 
@@ -1180,7 +1195,7 @@ class AsyncSessionsClient:
         request_options: typing.Optional[RequestOptions] = None,
     ) -> GetSessionResponse:
         """
-        Update a session: optional `title`, `metadata`, `shared`, and (inline sessions only) `agent` as `{ spec: AgentSpec }`. Named sessions reject agent updates. An empty body is a valid no-op that refreshes `updated_at`. Only the session creator may update it.
+        Update a session: optional `title`, `metadata`, `shared` (deprecated; use the access endpoints), and (inline sessions only) `agent` as `{ spec: AgentSpec }`. Named sessions reject agent updates. An empty body is a valid no-op that refreshes `updated_at`. Only the session creator may update it.
 
         Parameters
         ----------
@@ -1192,7 +1207,7 @@ class AsyncSessionsClient:
         metadata : typing.Optional[SessionMetadata]
 
         shared : typing.Optional[bool]
-            When true, any subject in the tenant may read this session and its turns/events by id.
+            Deprecated: share through `POST /sessions/{session_id}/access` with a `tenant` subject. When true, anyone in the tenant may read this session by id.
 
         title : typing.Optional[str]
             Human-readable session title.
@@ -1239,7 +1254,7 @@ class AsyncSessionsClient:
         self, *, session_id: str, request_options: typing.Optional[RequestOptions] = None
     ) -> ListSessionAccessResponse:
         """
-        List the users this session is shared with. Only the session creator may call this.
+        List who this session is shared with: individual users, plus the tenant when it is shared with everyone. Only the session creator may call this.
 
         Parameters
         ----------
@@ -1252,7 +1267,7 @@ class AsyncSessionsClient:
         Returns
         -------
         ListSessionAccessResponse
-            Users the session is shared with.
+            Grants on the session.
 
         Examples
         --------
@@ -1285,7 +1300,7 @@ class AsyncSessionsClient:
         request_options: typing.Optional[RequestOptions] = None,
     ) -> ListSessionAccessResponse:
         """
-        Share this session with users. Existing grants are left unchanged. Only the session creator may call this.
+        Share this session with users, or with everyone in the tenant through a `tenant` subject. Existing grants are left unchanged. Only the session creator may call this.
 
         Parameters
         ----------
@@ -1307,7 +1322,11 @@ class AsyncSessionsClient:
         --------
         import asyncio
 
-        from trueforge_sdk import AsyncTrueForge, SessionAccessSubject
+        from trueforge_sdk import (
+            AsyncTrueForge,
+            SessionAccessSubject,
+            SessionAccessSubjectType,
+        )
 
         client = AsyncTrueForge(
             token="YOUR_TOKEN",
@@ -1321,6 +1340,7 @@ class AsyncSessionsClient:
                 subjects=[
                     SessionAccessSubject(
                         subject_id="subject_id",
+                        subject_type=SessionAccessSubjectType.USER,
                     )
                 ],
             )
@@ -1334,18 +1354,26 @@ class AsyncSessionsClient:
         return _response.data
 
     async def delete_access(
-        self, *, session_id: str, subject_id: str, request_options: typing.Optional[RequestOptions] = None
+        self,
+        *,
+        session_id: str,
+        subject_type: SessionAccessSubjectType,
+        subject_id: str,
+        request_options: typing.Optional[RequestOptions] = None,
     ) -> DeleteSessionAccessResponse:
         """
-        Revoke one user's access to this session. Only the session creator may call this.
+        Revoke one grant on this session. Only the session creator may call this.
 
         Parameters
         ----------
         session_id : str
             Session identifier.
 
+        subject_type : SessionAccessSubjectType
+            Kind of subject the session is shared with. `tenant` shares it with everyone in the tenant.
+
         subject_id : str
-            Subject identifier, as returned by `GET /api/v1/users`.
+            A user id from `GET /api/v1/users`, or the tenant id of the caller for a `tenant` subject.
 
         request_options : typing.Optional[RequestOptions]
             Request-specific configuration.
@@ -1359,7 +1387,7 @@ class AsyncSessionsClient:
         --------
         import asyncio
 
-        from trueforge_sdk import AsyncTrueForge
+        from trueforge_sdk import AsyncTrueForge, SessionAccessSubjectType
 
         client = AsyncTrueForge(
             token="YOUR_TOKEN",
@@ -1370,6 +1398,7 @@ class AsyncSessionsClient:
         async def main() -> None:
             await client.sessions.delete_access(
                 session_id="session_id",
+                subject_type=SessionAccessSubjectType.USER,
                 subject_id="subject_id",
             )
 
@@ -1377,7 +1406,7 @@ class AsyncSessionsClient:
         asyncio.run(main())
         """
         _response = await self._raw_client.delete_access(
-            session_id=session_id, subject_id=subject_id, request_options=request_options
+            session_id=session_id, subject_type=subject_type, subject_id=subject_id, request_options=request_options
         )
         return _response.data
 

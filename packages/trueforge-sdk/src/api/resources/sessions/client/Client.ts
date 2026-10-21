@@ -453,7 +453,7 @@ export class SessionsClient {
     }
 
     /**
-     * Update a session: optional `title`, `metadata`, `shared`, and (inline sessions only) `agent` as `{ spec: AgentSpec }`. Named sessions reject agent updates. An empty body is a valid no-op that refreshes `updated_at`. Only the session creator may update it.
+     * Update a session: optional `title`, `metadata`, `shared` (deprecated; use the access endpoints), and (inline sessions only) `agent` as `{ spec: AgentSpec }`. Named sessions reject agent updates. An empty body is a valid no-op that refreshes `updated_at`. Only the session creator may update it.
      *
      * @param {string} session_id - Session identifier.
      * @param {TrueForge.UpdateSessionRequest} request
@@ -591,7 +591,7 @@ export class SessionsClient {
     }
 
     /**
-     * List the users this session is shared with. Only the session creator may call this.
+     * List who this session is shared with: individual users, plus the tenant when it is shared with everyone. Only the session creator may call this.
      *
      * @param {string} session_id - Session identifier.
      * @param {SessionsClient.RequestOptions} requestOptions - Request-specific configuration.
@@ -691,7 +691,7 @@ export class SessionsClient {
     }
 
     /**
-     * Share this session with users. Existing grants are left unchanged. Only the session creator may call this.
+     * Share this session with users, or with everyone in the tenant through a `tenant` subject. Existing grants are left unchanged. Only the session creator may call this.
      *
      * @param {string} session_id - Session identifier.
      * @param {TrueForge.CreateSessionAccessRequest} request
@@ -834,11 +834,11 @@ export class SessionsClient {
     }
 
     /**
-     * Revoke one user's access to this session. Only the session creator may call this.
+     * Revoke one grant on this session. Only the session creator may call this.
      *
      * @param {string} session_id - Session identifier.
-     * @param {TrueForge.SessionAccessSubjectType} subject_type - Kind of subject the session is shared with.
-     * @param {string} subject_id - Subject identifier, as returned by `GET /api/v1/users`.
+     * @param {TrueForge.SessionAccessSubjectType} subject_type - Kind of subject the session is shared with. `tenant` shares it with everyone in the tenant.
+     * @param {string} subject_id - A user id from `GET /api/v1/users`, or the tenant id of the caller for a `tenant` subject.
      * @param {SessionsClient.RequestOptions} requestOptions - Request-specific configuration.
      *
      * @throws {@link TrueForge.ForbiddenError}
