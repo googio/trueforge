@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.180.0-rc.2
+
+### Patch Changes
+
+- Updated dependencies [5d9b938]
+  - @truefoundry/trueforge-assistant-ui-runtime@0.180.0-rc.2
+
 ## 0.180.0-rc.1
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @truefoundry/trueforge-assistant-ui-runtime
 
+## 0.180.0-rc.2
+
+### Patch Changes
+
+- 5d9b938: Paint a loaded session from its events window before confirming the tip, and stop fetching the oldest turn to decide whether that tip is still running. A send that applies its message in that window is kept, a send that fails before then still lets the load finish, and a tip that finishes before its done event is still shown.
+
 ## 0.180.0-rc.1
 
 ### Patch Changes
