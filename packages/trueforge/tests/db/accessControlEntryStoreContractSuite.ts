@@ -138,6 +138,24 @@ export function runAccessControlEntryStoreContractSuite(getEnv: () => AccessCont
     );
   });
 
+  it('hasUserAccess is true only for a live grant on that session and tenant', async () => {
+    const { store, seedSession } = getEnv();
+    await seedSession({ tenant_id: TENANT, session_id: 's1' });
+    await seedSession({ tenant_id: TENANT, session_id: 's2' });
+    await store.grantSessionAccess({
+      tenant_id: TENANT,
+      session_id: 's1',
+      subjects: [user('alice'), user('bob')],
+      granted_by_subject: OWNER,
+    });
+    await store.revokeSessionAccess({ tenant_id: TENANT, session_id: 's1', subject: user('bob') });
+
+    expect(await store.hasUserAccess({ tenant_id: TENANT, session_id: 's1', subject_id: 'alice' })).toBe(true);
+    expect(await store.hasUserAccess({ tenant_id: TENANT, session_id: 's2', subject_id: 'alice' })).toBe(false);
+    expect(await store.hasUserAccess({ tenant_id: OTHER_TENANT, session_id: 's1', subject_id: 'alice' })).toBe(false);
+    expect(await store.hasUserAccess({ tenant_id: TENANT, session_id: 's1', subject_id: 'bob' })).toBe(false);
+  });
+
   it('rejects grants on a session that does not exist', async () => {
     const { store } = getEnv();
     await expect(

@@ -487,7 +487,9 @@ export function createSessionsRouter<TTransaction>(deps: SessionsRouterDeps<TTra
       return c.json({ error: { message: `Session not found: ${sessionId}` } }, 404);
     }
     const allowed = await canReadSession({
+      session_id: sessionId,
       shared: record.shared,
+      accessStore: deps.accessControlEntryStore,
       store: deps.resolveAgentStore(c),
       context: requestContext,
       authorizer: deps.authorizer,
@@ -671,7 +673,9 @@ export function createSessionsRouter<TTransaction>(deps: SessionsRouterDeps<TTra
       return c.json({ error: { message: `Session not found: ${sessionId}` } }, 404);
     }
     const allowed = await canReadSession({
+      session_id: sessionId,
       shared: session.record.shared,
+      accessStore: deps.accessControlEntryStore,
       store: deps.resolveAgentStore(c),
       context: requestContext,
       authorizer: deps.authorizer,

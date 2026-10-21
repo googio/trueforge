@@ -31,7 +31,15 @@ export interface RevokeSessionAccessInput {
   subject: SessionAccessSubject;
 }
 
+export interface HasUserSessionAccessInput {
+  tenant_id: string;
+  session_id: string;
+  subject_id: string;
+}
+
 export interface IAccessControlEntryStore<TTransaction = never> {
+  /** True when `subject_id` holds a `user` grant on the session. */
+  hasUserAccess(input: HasUserSessionAccessInput, transaction?: TTransaction): Promise<boolean>;
   /** Ordered by (created_at, subject_id). */
   listSessionAccess(input: ListSessionAccessInput, transaction?: TTransaction): Promise<SessionAccessRecord[]>;
   /** Inserts the subjects; existing grants are left untouched. Rejects when the session does not exist. */

@@ -147,6 +147,7 @@ describe('sessions HTTP agent binding', () => {
       createTurnsRouter({
         sessions,
         sessionStore,
+        accessControlEntryStore: deps.accessControlEntryStore,
         activeTurns: deps.activeTurns,
         resolveModelProviderStore: () => modelProviderStore,
         resolveMcpServerStore: () =>

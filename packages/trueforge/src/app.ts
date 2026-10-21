@@ -608,6 +608,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createTurnsRouter({
         sessions: deps.sessions,
         sessionStore: deps.sessionStore,
+        accessControlEntryStore: deps.accessControlEntryStore,
         activeTurns: deps.activeTurns,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,

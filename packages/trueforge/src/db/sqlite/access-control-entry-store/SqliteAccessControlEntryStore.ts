@@ -2,6 +2,7 @@ import type { CreatedBySubject } from '@truefoundry/trueforge-core/agent-session
 import type { ExpressionBuilder, Kysely, Transaction } from 'kysely';
 import type {
   GrantSessionAccessInput,
+  HasUserSessionAccessInput,
   IAccessControlEntryStore,
   ListSessionAccessInput,
   RevokeSessionAccessInput,
@@ -27,6 +28,19 @@ export class SqliteAccessControlEntryStore implements IAccessControlEntryStore<T
 
   constructor(db: Kysely<Database>) {
     this.#db = db;
+  }
+
+  async hasUserAccess(input: HasUserSessionAccessInput, transaction?: Transaction<Database>): Promise<boolean> {
+    const db = transaction ?? this.#db;
+    const row = await db
+      .selectFrom('access_control_entry')
+      .select(eb => eb.lit(1).as('found'))
+      .where('tenant_id', '=', input.tenant_id)
+      .where('session_id', '=', input.session_id)
+      .where('subject_type', '=', 'user')
+      .where('subject_id', '=', input.subject_id)
+      .executeTakeFirst();
+    return row !== undefined;
   }
 
   async listSessionAccess(

@@ -13,6 +13,7 @@ import { TrueForgeAuthorizer, type Authorizer } from '../../../src/auth/authoriz
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
+import { SqliteAccessControlEntryStore } from '../../../src/db/sqlite/access-control-entry-store/SqliteAccessControlEntryStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
@@ -121,6 +122,7 @@ describe('turns', () => {
         createTurnsRouter({
           sessions,
           sessionStore,
+          accessControlEntryStore: new SqliteAccessControlEntryStore(db),
           activeTurns: new ActiveTurnRegistry(),
           resolveModelProviderStore: () => new SqliteModelProviderStore(db),
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, tokenStore),
@@ -217,6 +219,7 @@ describe('turns', () => {
         createTurnsRouter({
           sessions: new Sessions({ sessionStore }),
           sessionStore,
+          accessControlEntryStore: new SqliteAccessControlEntryStore(db),
           activeTurns: new ActiveTurnRegistry(),
           resolveModelProviderStore: () => new SqliteModelProviderStore(db),
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, new SqliteOAuthTokenStore(db)),
@@ -319,6 +322,7 @@ describe('turns', () => {
         createTurnsRouter({
           sessions: new Sessions({ sessionStore }),
           sessionStore,
+          accessControlEntryStore: new SqliteAccessControlEntryStore(db),
           activeTurns: new ActiveTurnRegistry(),
           resolveModelProviderStore: () => new SqliteModelProviderStore(db),
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, new SqliteOAuthTokenStore(db)),
@@ -390,6 +394,7 @@ describe('turns', () => {
         createTurnsRouter({
           sessions,
           sessionStore,
+          accessControlEntryStore: new SqliteAccessControlEntryStore(db),
           activeTurns: new ActiveTurnRegistry(),
           resolveModelProviderStore: () => new SqliteModelProviderStore(db),
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, new SqliteOAuthTokenStore(db)),
@@ -498,6 +503,7 @@ describe('turns', () => {
         createTurnsRouter({
           sessions,
           sessionStore: new SqliteSessionStore(db),
+          accessControlEntryStore: new SqliteAccessControlEntryStore(db),
           activeTurns: new ActiveTurnRegistry(),
           resolveModelProviderStore: () => modelProviderStore,
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, tokenStore),
@@ -629,6 +635,7 @@ describe('turns', () => {
         createTurnsRouter({
           sessions,
           sessionStore: new SqliteSessionStore(db),
+          accessControlEntryStore: new SqliteAccessControlEntryStore(db),
           activeTurns: new ActiveTurnRegistry(),
           resolveModelProviderStore: () => modelProviderStore,
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, tokenStore),
@@ -748,6 +755,7 @@ describe('turns', () => {
         createTurnsRouter({
           sessions,
           sessionStore: new SqliteSessionStore(db),
+          accessControlEntryStore: new SqliteAccessControlEntryStore(db),
           activeTurns: new ActiveTurnRegistry(),
           resolveModelProviderStore: () => modelProviderStore,
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, tokenStore),
@@ -835,6 +843,7 @@ describe('turns', () => {
         createTurnsRouter({
           sessions,
           sessionStore,
+          accessControlEntryStore: new SqliteAccessControlEntryStore(db),
           activeTurns: new ActiveTurnRegistry(),
           resolveModelProviderStore: () => new SqliteModelProviderStore(db),
           resolveMcpServerStore: () => mcpServerStoreWithAuth(db, tokenStore),
