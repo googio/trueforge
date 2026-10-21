@@ -76,7 +76,8 @@ export class TrueForgeMcpServerResolver implements IMcpServerResolver {
         type: 'remote',
         name: TRUEFORGE_CONNECTOR_NAME,
         url: trueForgeMcpEndpoint.url,
-        description: 'Manage resources in this TrueForge deployment.',
+        description:
+          'Create, update, and read agents, schedules, and sandbox environments in this deployment. Read configured models, MCP servers, and skills. Does not run agents or turns.',
       },
       created_at: now,
       updated_at: now,

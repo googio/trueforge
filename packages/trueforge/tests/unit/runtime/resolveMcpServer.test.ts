@@ -224,7 +224,9 @@ describe('getMcpConnection', () => {
     });
 
     expect(connection?.url).toMatch(/\/mcp$/);
-    expect(connection?.description).toBe('Manage resources in this TrueForge deployment.');
+    expect(connection?.description).toBe(
+      'Create, update, and read agents, schedules, and sandbox environments in this deployment. Read configured models, MCP servers, and skills. Does not run agents or turns.',
+    );
     expect(connection?.headers).toEqual({
       Authorization: 'Bearer draft-token',
       'X-TrueForge-Test': 'forwarded',
