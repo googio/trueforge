@@ -1,5 +1,3 @@
-import { HTTPException } from 'hono/http-exception';
-
 import type { AgentAction, AgentListAccess, Authorizer, GetPermissionsInput } from '../auth/authorizer';
 import type { RequestContext } from '../auth/identity';
 import type { AgentRecord } from '../db/agentStore';
@@ -11,6 +9,7 @@ import {
   SESSION_OWNER_PERMISSIONS,
   TENANT_CREATE_AGENT_PERMISSIONS,
 } from '../schemas/permissions';
+import { requireUserCredential } from './accessToken';
 import type { AgentPermission, TrueFoundryServiceFoundryServerClient } from './TrueFoundryServiceFoundryServerClient';
 
 const permissionByAction: Record<AgentAction, AgentPermission> = {
@@ -36,13 +35,6 @@ function toResourcePermissions(permissions: readonly AgentPermission[]): Resourc
   return mappableAgentPermissions
     .filter(agentPermission => permissions.includes(agentPermission))
     .map(agentPermission => resourcePermissionByAgentPermission[agentPermission]);
-}
-
-function requireUserCredential(context: RequestContext): string {
-  if (context.user_credential === null) {
-    throw new HTTPException(401, { message: 'Authentication token required for agent authorization' });
-  }
-  return context.user_credential;
 }
 
 export class TrueFoundryAuthorizer implements Authorizer {

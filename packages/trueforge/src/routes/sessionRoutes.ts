@@ -15,12 +15,25 @@ import {
   ListSessionsResponseSchema,
   UpdateSessionRequestSchema,
 } from '../schemas/session';
+import {
+  CreateSessionAccessRequestSchema,
+  DeleteSessionAccessResponseSchema,
+  ListSessionAccessResponseSchema,
+  SessionAccessSubjectSchema,
+  SessionAccessSubjectTypeSchema,
+} from '../schemas/sessionAccess';
 import { CancelSessionRequestSchema, CancelSessionResponseSchema } from '../schemas/turn';
 import { TOKEN_PAGINATION } from './fernExtensions';
 import { OpenApiTag } from './openapiTags';
 
 export const SessionIdParamsSchema = z.object({
   session_id: z.string().min(1).max(64).describe('Session identifier.'),
+});
+
+const SessionAccessSubjectParamsSchema = z.object({
+  ...SessionIdParamsSchema.shape,
+  subject_type: SessionAccessSubjectTypeSchema,
+  subject_id: SessionAccessSubjectSchema.shape.subject_id,
 });
 
 export const createSessionRoute = createRoute({
@@ -289,6 +302,100 @@ export const listSessionEventsRoute = createRoute({
     404: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'Session not found.',
+    },
+  },
+});
+
+export const listSessionAccessRoute = createRoute({
+  method: 'get',
+  path: '/{session_id}/access',
+  tags: [OpenApiTag.AGENT_SESSIONS],
+  summary: 'List session access',
+  description: 'List the users this session is shared with. Only the session creator may call this.',
+  'x-fern-sdk-group-name': ['sessions'],
+  'x-fern-sdk-method-name': 'list_access',
+  request: {
+    params: SessionIdParamsSchema,
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: ListSessionAccessResponseSchema } },
+      description: 'Users the session is shared with.',
+    },
+    403: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Caller is not the session creator.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Session not found.',
+    },
+  },
+});
+
+export const createSessionAccessRoute = createRoute({
+  method: 'post',
+  path: '/{session_id}/access',
+  tags: [OpenApiTag.AGENT_SESSIONS],
+  summary: 'Share a session',
+  description:
+    'Share this session with users. Existing grants are left unchanged. Only the session creator may call this.',
+  'x-fern-sdk-group-name': ['sessions'],
+  'x-fern-sdk-method-name': 'create_access',
+  request: {
+    params: SessionIdParamsSchema,
+    body: {
+      content: { 'application/json': { schema: CreateSessionAccessRequestSchema } },
+      required: true,
+    },
+  },
+  responses: {
+    201: {
+      content: { 'application/json': { schema: ListSessionAccessResponseSchema } },
+      description: 'All grants on the session after the write.',
+    },
+    400: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Invalid request body.',
+    },
+    403: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Caller is not the session creator.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Session not found.',
+    },
+    422: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'A subject is unknown or is the session creator.',
+    },
+  },
+});
+
+export const deleteSessionAccessRoute = createRoute({
+  method: 'delete',
+  path: '/{session_id}/access/{subject_type}/{subject_id}',
+  tags: [OpenApiTag.AGENT_SESSIONS],
+  summary: 'Revoke session access',
+  description: "Revoke one user's access to this session. Only the session creator may call this.",
+  'x-fern-sdk-group-name': ['sessions'],
+  'x-fern-sdk-method-name': 'delete_access',
+  request: {
+    params: SessionAccessSubjectParamsSchema,
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: DeleteSessionAccessResponseSchema } },
+      description: 'Access revoked.',
+    },
+    403: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Caller is not the session creator.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Session or grant not found.',
     },
   },
 });
