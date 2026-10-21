@@ -1874,7 +1874,7 @@ await client.sessions.create({
 <dl>
 <dd>
 
-Fetch a session by ID. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+Fetch a session by ID. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 </dd>
 </dl>
 </dd>
@@ -2059,6 +2059,224 @@ await client.sessions.update("session_id");
 </dl>
 </details>
 
+<details><summary><code>client.sessions.<a href="/src/api/resources/sessions/client/Client.ts">listAccess</a>(session_id) -> TrueForge.ListSessionAccessResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+List the users this session is shared with. Only the session creator may call this.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.sessions.listAccess("session_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**session_id:** `string` — Session identifier.
+    
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SessionsClient.RequestOptions` 
+    
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.sessions.<a href="/src/api/resources/sessions/client/Client.ts">createAccess</a>(session_id, { ...params }) -> TrueForge.ListSessionAccessResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Share this session with users. Existing grants are left unchanged. Only the session creator may call this.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.sessions.createAccess("session_id", {
+    subjects: [{
+            subjectId: "subject_id",
+            subjectType: "user"
+        }]
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**session_id:** `string` — Session identifier.
+    
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.CreateSessionAccessRequest` 
+    
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SessionsClient.RequestOptions` 
+    
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.sessions.<a href="/src/api/resources/sessions/client/Client.ts">deleteAccess</a>(session_id, subject_type, subject_id) -> TrueForge.DeleteSessionAccessResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Revoke one user's access to this session. Only the session creator may call this.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.sessions.deleteAccess("session_id", "user", "subject_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**session_id:** `string` — Session identifier.
+    
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**subject_type:** `TrueForge.SessionAccessSubjectType` — Kind of subject the session is shared with.
+    
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**subject_id:** `string` — Subject identifier, as returned by `GET /api/v1/users`.
+    
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SessionsClient.RequestOptions` 
+    
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.sessions.<a href="/src/api/resources/sessions/client/Client.ts">cancel</a>(session_id, { ...params }) -> TrueForge.CancelSessionResponse</code></summary>
 <dl>
 <dd>
@@ -2142,7 +2360,7 @@ await client.sessions.cancel("session_id");
 <dl>
 <dd>
 
-List session events as `{ turn_id, event }` across the active turn branch (newest first), including persisted events from a running tip. Each turn contributes turn.created, content events (model.message, tool.call, …), and turn.done when terminal; streaming deltas are not included. Use `page_token` to paginate backward toward older events while retaining the original branch anchor. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+List session events as `{ turn_id, event }` across the active turn branch (newest first), including persisted events from a running tip. Each turn contributes turn.created, content events (model.message, tool.call, …), and turn.done when terminal; streaming deltas are not included. Use `page_token` to paginate backward toward older events while retaining the original branch anchor. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 </dd>
 </dl>
 </dd>
@@ -2225,7 +2443,7 @@ const response = page.response;
 <dl>
 <dd>
 
-List turns for a session (newest first by default), token-paginated. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+List turns for a session (newest first by default), token-paginated. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 </dd>
 </dl>
 </dd>
@@ -2461,7 +2679,7 @@ await client.sessions.createTurn("session_id", {});
 <dl>
 <dd>
 
-Fetch a single turn by ID. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+Fetch a single turn by ID. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 </dd>
 </dl>
 </dd>
@@ -2613,7 +2831,7 @@ await client.sessions.downloadSandboxFile("session_id", "turn_id", {
 <dl>
 <dd>
 
-Paginated persisted events for a turn (insertion order by default). Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+Paginated persisted events for a turn (insertion order by default). Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 </dd>
 </dl>
 </dd>
@@ -2967,6 +3185,82 @@ await client.skills.listVersions({
 <dd>
 
 **requestOptions:** `SkillsClient.RequestOptions` 
+    
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Users
+<details><summary><code>client.users.<a href="/src/api/resources/users/client/Client.ts">list</a>({ ...params }) -> core.Page&lt;TrueForge.User, TrueForge.ListUsersResponse&gt;</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+List users in the tenant that sessions can be shared with. Searches email and display name. Returns an empty list when no user directory is configured.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+const pageableResponse = await client.users.list();
+for await (const item of pageableResponse) {
+    console.log(item);
+}
+
+// Or you can manually iterate page-by-page
+let page = await client.users.list();
+while (page.hasNextPage()) {
+    page = await page.getNextPage();
+}
+
+// You can also access the underlying response
+const response = page.response;
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.ListUsersRequest` 
+    
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `UsersClient.RequestOptions` 
     
 </dd>
 </dl>

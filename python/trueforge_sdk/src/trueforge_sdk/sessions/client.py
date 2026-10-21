@@ -10,8 +10,10 @@ from ..core.stream import AsyncStream, Stream, StreamEvent
 from ..types.cancel_session_response import CancelSessionResponse
 from ..types.create_session_agent import CreateSessionAgent
 from ..types.create_turn_event_response import CreateTurnEventResponse
+from ..types.delete_session_access_response import DeleteSessionAccessResponse
 from ..types.get_session_response import GetSessionResponse
 from ..types.get_turn_response import GetTurnResponse
+from ..types.list_session_access_response import ListSessionAccessResponse
 from ..types.list_session_events_response import ListSessionEventsResponse
 from ..types.list_sessions_order import ListSessionsOrder
 from ..types.list_sessions_response import ListSessionsResponse
@@ -20,6 +22,7 @@ from ..types.list_turn_events_response import ListTurnEventsResponse
 from ..types.list_turns_response import ListTurnsResponse
 from ..types.previous_turn_id_input import PreviousTurnIdInput
 from ..types.session import Session
+from ..types.session_access_subject import SessionAccessSubject
 from ..types.session_agent_spec_body import SessionAgentSpecBody
 from ..types.session_event import SessionEvent
 from ..types.session_event_item import SessionEventItem
@@ -180,7 +183,7 @@ class SessionsClient:
 
     def get(self, *, session_id: str, request_options: typing.Optional[RequestOptions] = None) -> GetSessionResponse:
         """
-        Fetch a session by ID. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        Fetch a session by ID. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------
@@ -299,6 +302,128 @@ class SessionsClient:
         )
         return _response.data
 
+    def list_access(
+        self, *, session_id: str, request_options: typing.Optional[RequestOptions] = None
+    ) -> ListSessionAccessResponse:
+        """
+        List the users this session is shared with. Only the session creator may call this.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier.
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        ListSessionAccessResponse
+            Users the session is shared with.
+
+        Examples
+        --------
+        from trueforge_sdk import TrueForge
+
+        client = TrueForge(
+            token="YOUR_TOKEN",
+            base_url="https://yourhost.com/path/to/api",
+        )
+        client.sessions.list_access(
+            session_id="session_id",
+        )
+        """
+        _response = self._raw_client.list_access(session_id=session_id, request_options=request_options)
+        return _response.data
+
+    def create_access(
+        self,
+        *,
+        session_id: str,
+        subjects: typing.Sequence[SessionAccessSubject],
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> ListSessionAccessResponse:
+        """
+        Share this session with users. Existing grants are left unchanged. Only the session creator may call this.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier.
+
+        subjects : typing.Sequence[SessionAccessSubject]
+            Subjects to share the session with (1–100).
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        ListSessionAccessResponse
+            All grants on the session after the write.
+
+        Examples
+        --------
+        from trueforge_sdk import SessionAccessSubject, TrueForge
+
+        client = TrueForge(
+            token="YOUR_TOKEN",
+            base_url="https://yourhost.com/path/to/api",
+        )
+        client.sessions.create_access(
+            session_id="session_id",
+            subjects=[
+                SessionAccessSubject(
+                    subject_id="subject_id",
+                )
+            ],
+        )
+        """
+        _response = self._raw_client.create_access(
+            session_id=session_id, subjects=subjects, request_options=request_options
+        )
+        return _response.data
+
+    def delete_access(
+        self, *, session_id: str, subject_id: str, request_options: typing.Optional[RequestOptions] = None
+    ) -> DeleteSessionAccessResponse:
+        """
+        Revoke one user's access to this session. Only the session creator may call this.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier.
+
+        subject_id : str
+            Subject identifier, as returned by `GET /api/v1/users`.
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        DeleteSessionAccessResponse
+            Access revoked.
+
+        Examples
+        --------
+        from trueforge_sdk import TrueForge
+
+        client = TrueForge(
+            token="YOUR_TOKEN",
+            base_url="https://yourhost.com/path/to/api",
+        )
+        client.sessions.delete_access(
+            session_id="session_id",
+            subject_id="subject_id",
+        )
+        """
+        _response = self._raw_client.delete_access(
+            session_id=session_id, subject_id=subject_id, request_options=request_options
+        )
+        return _response.data
+
     def cancel(
         self, *, session_id: str, request_options: typing.Optional[RequestOptions] = None
     ) -> CancelSessionResponse:
@@ -343,7 +468,7 @@ class SessionsClient:
         request_options: typing.Optional[RequestOptions] = None,
     ) -> SyncPager[SessionEventItem, ListSessionEventsResponse]:
         """
-        List session events as `{ turn_id, event }` across the active turn branch (newest first), including persisted events from a running tip. Each turn contributes turn.created, content events (model.message, tool.call, …), and turn.done when terminal; streaming deltas are not included. Use `page_token` to paginate backward toward older events while retaining the original branch anchor. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        List session events as `{ turn_id, event }` across the active turn branch (newest first), including persisted events from a running tip. Each turn contributes turn.created, content events (model.message, tool.call, …), and turn.done when terminal; streaming deltas are not included. Use `page_token` to paginate backward toward older events while retaining the original branch anchor. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------
@@ -401,7 +526,7 @@ class SessionsClient:
         request_options: typing.Optional[RequestOptions] = None,
     ) -> SyncPager[Turn, ListTurnsResponse]:
         """
-        List turns for a session (newest first by default), token-paginated. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        List turns for a session (newest first by default), token-paginated. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------
@@ -553,7 +678,7 @@ class SessionsClient:
         self, *, session_id: str, turn_id: str, request_options: typing.Optional[RequestOptions] = None
     ) -> GetTurnResponse:
         """
-        Fetch a single turn by ID. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        Fetch a single turn by ID. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------
@@ -642,7 +767,7 @@ class SessionsClient:
         request_options: typing.Optional[RequestOptions] = None,
     ) -> SyncPager[SessionEvent, ListTurnEventsResponse]:
         """
-        Paginated persisted events for a turn (insertion order by default). Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        Paginated persisted events for a turn (insertion order by default). Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------
@@ -967,7 +1092,7 @@ class AsyncSessionsClient:
         self, *, session_id: str, request_options: typing.Optional[RequestOptions] = None
     ) -> GetSessionResponse:
         """
-        Fetch a session by ID. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        Fetch a session by ID. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------
@@ -1110,6 +1235,152 @@ class AsyncSessionsClient:
         )
         return _response.data
 
+    async def list_access(
+        self, *, session_id: str, request_options: typing.Optional[RequestOptions] = None
+    ) -> ListSessionAccessResponse:
+        """
+        List the users this session is shared with. Only the session creator may call this.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier.
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        ListSessionAccessResponse
+            Users the session is shared with.
+
+        Examples
+        --------
+        import asyncio
+
+        from trueforge_sdk import AsyncTrueForge
+
+        client = AsyncTrueForge(
+            token="YOUR_TOKEN",
+            base_url="https://yourhost.com/path/to/api",
+        )
+
+
+        async def main() -> None:
+            await client.sessions.list_access(
+                session_id="session_id",
+            )
+
+
+        asyncio.run(main())
+        """
+        _response = await self._raw_client.list_access(session_id=session_id, request_options=request_options)
+        return _response.data
+
+    async def create_access(
+        self,
+        *,
+        session_id: str,
+        subjects: typing.Sequence[SessionAccessSubject],
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> ListSessionAccessResponse:
+        """
+        Share this session with users. Existing grants are left unchanged. Only the session creator may call this.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier.
+
+        subjects : typing.Sequence[SessionAccessSubject]
+            Subjects to share the session with (1–100).
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        ListSessionAccessResponse
+            All grants on the session after the write.
+
+        Examples
+        --------
+        import asyncio
+
+        from trueforge_sdk import AsyncTrueForge, SessionAccessSubject
+
+        client = AsyncTrueForge(
+            token="YOUR_TOKEN",
+            base_url="https://yourhost.com/path/to/api",
+        )
+
+
+        async def main() -> None:
+            await client.sessions.create_access(
+                session_id="session_id",
+                subjects=[
+                    SessionAccessSubject(
+                        subject_id="subject_id",
+                    )
+                ],
+            )
+
+
+        asyncio.run(main())
+        """
+        _response = await self._raw_client.create_access(
+            session_id=session_id, subjects=subjects, request_options=request_options
+        )
+        return _response.data
+
+    async def delete_access(
+        self, *, session_id: str, subject_id: str, request_options: typing.Optional[RequestOptions] = None
+    ) -> DeleteSessionAccessResponse:
+        """
+        Revoke one user's access to this session. Only the session creator may call this.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier.
+
+        subject_id : str
+            Subject identifier, as returned by `GET /api/v1/users`.
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        DeleteSessionAccessResponse
+            Access revoked.
+
+        Examples
+        --------
+        import asyncio
+
+        from trueforge_sdk import AsyncTrueForge
+
+        client = AsyncTrueForge(
+            token="YOUR_TOKEN",
+            base_url="https://yourhost.com/path/to/api",
+        )
+
+
+        async def main() -> None:
+            await client.sessions.delete_access(
+                session_id="session_id",
+                subject_id="subject_id",
+            )
+
+
+        asyncio.run(main())
+        """
+        _response = await self._raw_client.delete_access(
+            session_id=session_id, subject_id=subject_id, request_options=request_options
+        )
+        return _response.data
+
     async def cancel(
         self, *, session_id: str, request_options: typing.Optional[RequestOptions] = None
     ) -> CancelSessionResponse:
@@ -1162,7 +1433,7 @@ class AsyncSessionsClient:
         request_options: typing.Optional[RequestOptions] = None,
     ) -> AsyncPager[SessionEventItem, ListSessionEventsResponse]:
         """
-        List session events as `{ turn_id, event }` across the active turn branch (newest first), including persisted events from a running tip. Each turn contributes turn.created, content events (model.message, tool.call, …), and turn.done when terminal; streaming deltas are not included. Use `page_token` to paginate backward toward older events while retaining the original branch anchor. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        List session events as `{ turn_id, event }` across the active turn branch (newest first), including persisted events from a running tip. Each turn contributes turn.created, content events (model.message, tool.call, …), and turn.done when terminal; streaming deltas are not included. Use `page_token` to paginate backward toward older events while retaining the original branch anchor. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------
@@ -1229,7 +1500,7 @@ class AsyncSessionsClient:
         request_options: typing.Optional[RequestOptions] = None,
     ) -> AsyncPager[Turn, ListTurnsResponse]:
         """
-        List turns for a session (newest first by default), token-paginated. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        List turns for a session (newest first by default), token-paginated. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------
@@ -1407,7 +1678,7 @@ class AsyncSessionsClient:
         self, *, session_id: str, turn_id: str, request_options: typing.Optional[RequestOptions] = None
     ) -> GetTurnResponse:
         """
-        Fetch a single turn by ID. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        Fetch a single turn by ID. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------
@@ -1515,7 +1786,7 @@ class AsyncSessionsClient:
         request_options: typing.Optional[RequestOptions] = None,
     ) -> AsyncPager[SessionEvent, ListTurnEventsResponse]:
         """
-        Paginated persisted events for a turn (insertion order by default). Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        Paginated persisted events for a turn (insertion order by default). Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------

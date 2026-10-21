@@ -32,8 +32,10 @@ from ..errors.unprocessable_entity_error import UnprocessableEntityError
 from ..types.cancel_session_response import CancelSessionResponse
 from ..types.create_session_agent import CreateSessionAgent
 from ..types.create_turn_event_response import CreateTurnEventResponse
+from ..types.delete_session_access_response import DeleteSessionAccessResponse
 from ..types.get_session_response import GetSessionResponse
 from ..types.get_turn_response import GetTurnResponse
+from ..types.list_session_access_response import ListSessionAccessResponse
 from ..types.list_session_events_response import ListSessionEventsResponse
 from ..types.list_sessions_order import ListSessionsOrder
 from ..types.list_sessions_response import ListSessionsResponse
@@ -43,6 +45,7 @@ from ..types.list_turns_response import ListTurnsResponse
 from ..types.previous_turn_id_input import PreviousTurnIdInput
 from ..types.request_error_response import RequestErrorResponse
 from ..types.session import Session
+from ..types.session_access_subject import SessionAccessSubject
 from ..types.session_agent_spec_body import SessionAgentSpecBody
 from ..types.session_event import SessionEvent
 from ..types.session_event_item import SessionEventItem
@@ -281,7 +284,7 @@ class RawSessionsClient:
         self, *, session_id: str, request_options: typing.Optional[RequestOptions] = None
     ) -> HttpResponse[GetSessionResponse]:
         """
-        Fetch a session by ID. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        Fetch a session by ID. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------
@@ -502,6 +505,242 @@ class RawSessionsClient:
             )
         raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response_json)
 
+    def list_access(
+        self, *, session_id: str, request_options: typing.Optional[RequestOptions] = None
+    ) -> HttpResponse[ListSessionAccessResponse]:
+        """
+        List the users this session is shared with. Only the session creator may call this.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier.
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        HttpResponse[ListSessionAccessResponse]
+            Users the session is shared with.
+        """
+        _response = self._client_wrapper.httpx_client.request(
+            f"api/v1/sessions/{encode_path_param(session_id)}/access",
+            method="GET",
+            request_options=request_options,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                _data = typing.cast(
+                    ListSessionAccessResponse,
+                    construct_type(
+                        type_=ListSessionAccessResponse,  # type: ignore
+                        object_=_response.json(),
+                    ),
+                )
+                return HttpResponse(response=_response, data=_data)
+            if _response.status_code == 403:
+                raise ForbiddenError(
+                    headers=dict(_response.headers),
+                    body=typing.cast(
+                        RequestErrorResponse,
+                        construct_type(
+                            type_=RequestErrorResponse,  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    ),
+                )
+            if _response.status_code == 404:
+                raise NotFoundError(
+                    headers=dict(_response.headers),
+                    body=typing.cast(
+                        RequestErrorResponse,
+                        construct_type(
+                            type_=RequestErrorResponse,  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    ),
+                )
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response.text)
+        except ValidationError as e:
+            raise ParsingError(
+                status_code=_response.status_code, headers=dict(_response.headers), body=_response.json(), cause=e
+            )
+        raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response_json)
+
+    def create_access(
+        self,
+        *,
+        session_id: str,
+        subjects: typing.Sequence[SessionAccessSubject],
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> HttpResponse[ListSessionAccessResponse]:
+        """
+        Share this session with users. Existing grants are left unchanged. Only the session creator may call this.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier.
+
+        subjects : typing.Sequence[SessionAccessSubject]
+            Subjects to share the session with (1–100).
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        HttpResponse[ListSessionAccessResponse]
+            All grants on the session after the write.
+        """
+        _response = self._client_wrapper.httpx_client.request(
+            f"api/v1/sessions/{encode_path_param(session_id)}/access",
+            method="POST",
+            json={
+                "subjects": convert_and_respect_annotation_metadata(
+                    object_=subjects, annotation=typing.Sequence[SessionAccessSubject], direction="write"
+                ),
+            },
+            headers={
+                "content-type": "application/json",
+            },
+            request_options=request_options,
+            omit=OMIT,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                _data = typing.cast(
+                    ListSessionAccessResponse,
+                    construct_type(
+                        type_=ListSessionAccessResponse,  # type: ignore
+                        object_=_response.json(),
+                    ),
+                )
+                return HttpResponse(response=_response, data=_data)
+            if _response.status_code == 400:
+                raise BadRequestError(
+                    headers=dict(_response.headers),
+                    body=typing.cast(
+                        RequestErrorResponse,
+                        construct_type(
+                            type_=RequestErrorResponse,  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    ),
+                )
+            if _response.status_code == 403:
+                raise ForbiddenError(
+                    headers=dict(_response.headers),
+                    body=typing.cast(
+                        RequestErrorResponse,
+                        construct_type(
+                            type_=RequestErrorResponse,  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    ),
+                )
+            if _response.status_code == 404:
+                raise NotFoundError(
+                    headers=dict(_response.headers),
+                    body=typing.cast(
+                        RequestErrorResponse,
+                        construct_type(
+                            type_=RequestErrorResponse,  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    ),
+                )
+            if _response.status_code == 422:
+                raise UnprocessableEntityError(
+                    headers=dict(_response.headers),
+                    body=typing.cast(
+                        RequestErrorResponse,
+                        construct_type(
+                            type_=RequestErrorResponse,  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    ),
+                )
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response.text)
+        except ValidationError as e:
+            raise ParsingError(
+                status_code=_response.status_code, headers=dict(_response.headers), body=_response.json(), cause=e
+            )
+        raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response_json)
+
+    def delete_access(
+        self, *, session_id: str, subject_id: str, request_options: typing.Optional[RequestOptions] = None
+    ) -> HttpResponse[DeleteSessionAccessResponse]:
+        """
+        Revoke one user's access to this session. Only the session creator may call this.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier.
+
+        subject_id : str
+            Subject identifier, as returned by `GET /api/v1/users`.
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        HttpResponse[DeleteSessionAccessResponse]
+            Access revoked.
+        """
+        _response = self._client_wrapper.httpx_client.request(
+            f"api/v1/sessions/{encode_path_param(session_id)}/access/user/{encode_path_param(subject_id)}",
+            method="DELETE",
+            request_options=request_options,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                _data = typing.cast(
+                    DeleteSessionAccessResponse,
+                    construct_type(
+                        type_=DeleteSessionAccessResponse,  # type: ignore
+                        object_=_response.json(),
+                    ),
+                )
+                return HttpResponse(response=_response, data=_data)
+            if _response.status_code == 403:
+                raise ForbiddenError(
+                    headers=dict(_response.headers),
+                    body=typing.cast(
+                        RequestErrorResponse,
+                        construct_type(
+                            type_=RequestErrorResponse,  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    ),
+                )
+            if _response.status_code == 404:
+                raise NotFoundError(
+                    headers=dict(_response.headers),
+                    body=typing.cast(
+                        RequestErrorResponse,
+                        construct_type(
+                            type_=RequestErrorResponse,  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    ),
+                )
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response.text)
+        except ValidationError as e:
+            raise ParsingError(
+                status_code=_response.status_code, headers=dict(_response.headers), body=_response.json(), cause=e
+            )
+        raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response_json)
+
     def cancel(
         self, *, session_id: str, request_options: typing.Optional[RequestOptions] = None
     ) -> HttpResponse[CancelSessionResponse]:
@@ -593,7 +832,7 @@ class RawSessionsClient:
         request_options: typing.Optional[RequestOptions] = None,
     ) -> SyncPager[SessionEventItem, ListSessionEventsResponse]:
         """
-        List session events as `{ turn_id, event }` across the active turn branch (newest first), including persisted events from a running tip. Each turn contributes turn.created, content events (model.message, tool.call, …), and turn.done when terminal; streaming deltas are not included. Use `page_token` to paginate backward toward older events while retaining the original branch anchor. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        List session events as `{ turn_id, event }` across the active turn branch (newest first), including persisted events from a running tip. Each turn contributes turn.created, content events (model.message, tool.call, …), and turn.done when terminal; streaming deltas are not included. Use `page_token` to paginate backward toward older events while retaining the original branch anchor. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------
@@ -701,7 +940,7 @@ class RawSessionsClient:
         request_options: typing.Optional[RequestOptions] = None,
     ) -> SyncPager[Turn, ListTurnsResponse]:
         """
-        List turns for a session (newest first by default), token-paginated. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        List turns for a session (newest first by default), token-paginated. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------
@@ -1130,7 +1369,7 @@ class RawSessionsClient:
         self, *, session_id: str, turn_id: str, request_options: typing.Optional[RequestOptions] = None
     ) -> HttpResponse[GetTurnResponse]:
         """
-        Fetch a single turn by ID. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        Fetch a single turn by ID. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------
@@ -1341,7 +1580,7 @@ class RawSessionsClient:
         request_options: typing.Optional[RequestOptions] = None,
     ) -> SyncPager[SessionEvent, ListTurnEventsResponse]:
         """
-        Paginated persisted events for a turn (insertion order by default). Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        Paginated persisted events for a turn (insertion order by default). Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------
@@ -1916,7 +2155,7 @@ class AsyncRawSessionsClient:
         self, *, session_id: str, request_options: typing.Optional[RequestOptions] = None
     ) -> AsyncHttpResponse[GetSessionResponse]:
         """
-        Fetch a session by ID. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        Fetch a session by ID. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------
@@ -2139,6 +2378,242 @@ class AsyncRawSessionsClient:
             )
         raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response_json)
 
+    async def list_access(
+        self, *, session_id: str, request_options: typing.Optional[RequestOptions] = None
+    ) -> AsyncHttpResponse[ListSessionAccessResponse]:
+        """
+        List the users this session is shared with. Only the session creator may call this.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier.
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        AsyncHttpResponse[ListSessionAccessResponse]
+            Users the session is shared with.
+        """
+        _response = await self._client_wrapper.httpx_client.request(
+            f"api/v1/sessions/{encode_path_param(session_id)}/access",
+            method="GET",
+            request_options=request_options,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                _data = typing.cast(
+                    ListSessionAccessResponse,
+                    construct_type(
+                        type_=ListSessionAccessResponse,  # type: ignore
+                        object_=_response.json(),
+                    ),
+                )
+                return AsyncHttpResponse(response=_response, data=_data)
+            if _response.status_code == 403:
+                raise ForbiddenError(
+                    headers=dict(_response.headers),
+                    body=typing.cast(
+                        RequestErrorResponse,
+                        construct_type(
+                            type_=RequestErrorResponse,  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    ),
+                )
+            if _response.status_code == 404:
+                raise NotFoundError(
+                    headers=dict(_response.headers),
+                    body=typing.cast(
+                        RequestErrorResponse,
+                        construct_type(
+                            type_=RequestErrorResponse,  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    ),
+                )
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response.text)
+        except ValidationError as e:
+            raise ParsingError(
+                status_code=_response.status_code, headers=dict(_response.headers), body=_response.json(), cause=e
+            )
+        raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response_json)
+
+    async def create_access(
+        self,
+        *,
+        session_id: str,
+        subjects: typing.Sequence[SessionAccessSubject],
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> AsyncHttpResponse[ListSessionAccessResponse]:
+        """
+        Share this session with users. Existing grants are left unchanged. Only the session creator may call this.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier.
+
+        subjects : typing.Sequence[SessionAccessSubject]
+            Subjects to share the session with (1–100).
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        AsyncHttpResponse[ListSessionAccessResponse]
+            All grants on the session after the write.
+        """
+        _response = await self._client_wrapper.httpx_client.request(
+            f"api/v1/sessions/{encode_path_param(session_id)}/access",
+            method="POST",
+            json={
+                "subjects": convert_and_respect_annotation_metadata(
+                    object_=subjects, annotation=typing.Sequence[SessionAccessSubject], direction="write"
+                ),
+            },
+            headers={
+                "content-type": "application/json",
+            },
+            request_options=request_options,
+            omit=OMIT,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                _data = typing.cast(
+                    ListSessionAccessResponse,
+                    construct_type(
+                        type_=ListSessionAccessResponse,  # type: ignore
+                        object_=_response.json(),
+                    ),
+                )
+                return AsyncHttpResponse(response=_response, data=_data)
+            if _response.status_code == 400:
+                raise BadRequestError(
+                    headers=dict(_response.headers),
+                    body=typing.cast(
+                        RequestErrorResponse,
+                        construct_type(
+                            type_=RequestErrorResponse,  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    ),
+                )
+            if _response.status_code == 403:
+                raise ForbiddenError(
+                    headers=dict(_response.headers),
+                    body=typing.cast(
+                        RequestErrorResponse,
+                        construct_type(
+                            type_=RequestErrorResponse,  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    ),
+                )
+            if _response.status_code == 404:
+                raise NotFoundError(
+                    headers=dict(_response.headers),
+                    body=typing.cast(
+                        RequestErrorResponse,
+                        construct_type(
+                            type_=RequestErrorResponse,  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    ),
+                )
+            if _response.status_code == 422:
+                raise UnprocessableEntityError(
+                    headers=dict(_response.headers),
+                    body=typing.cast(
+                        RequestErrorResponse,
+                        construct_type(
+                            type_=RequestErrorResponse,  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    ),
+                )
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response.text)
+        except ValidationError as e:
+            raise ParsingError(
+                status_code=_response.status_code, headers=dict(_response.headers), body=_response.json(), cause=e
+            )
+        raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response_json)
+
+    async def delete_access(
+        self, *, session_id: str, subject_id: str, request_options: typing.Optional[RequestOptions] = None
+    ) -> AsyncHttpResponse[DeleteSessionAccessResponse]:
+        """
+        Revoke one user's access to this session. Only the session creator may call this.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier.
+
+        subject_id : str
+            Subject identifier, as returned by `GET /api/v1/users`.
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        AsyncHttpResponse[DeleteSessionAccessResponse]
+            Access revoked.
+        """
+        _response = await self._client_wrapper.httpx_client.request(
+            f"api/v1/sessions/{encode_path_param(session_id)}/access/user/{encode_path_param(subject_id)}",
+            method="DELETE",
+            request_options=request_options,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                _data = typing.cast(
+                    DeleteSessionAccessResponse,
+                    construct_type(
+                        type_=DeleteSessionAccessResponse,  # type: ignore
+                        object_=_response.json(),
+                    ),
+                )
+                return AsyncHttpResponse(response=_response, data=_data)
+            if _response.status_code == 403:
+                raise ForbiddenError(
+                    headers=dict(_response.headers),
+                    body=typing.cast(
+                        RequestErrorResponse,
+                        construct_type(
+                            type_=RequestErrorResponse,  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    ),
+                )
+            if _response.status_code == 404:
+                raise NotFoundError(
+                    headers=dict(_response.headers),
+                    body=typing.cast(
+                        RequestErrorResponse,
+                        construct_type(
+                            type_=RequestErrorResponse,  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    ),
+                )
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response.text)
+        except ValidationError as e:
+            raise ParsingError(
+                status_code=_response.status_code, headers=dict(_response.headers), body=_response.json(), cause=e
+            )
+        raise ApiError(status_code=_response.status_code, headers=dict(_response.headers), body=_response_json)
+
     async def cancel(
         self, *, session_id: str, request_options: typing.Optional[RequestOptions] = None
     ) -> AsyncHttpResponse[CancelSessionResponse]:
@@ -2230,7 +2705,7 @@ class AsyncRawSessionsClient:
         request_options: typing.Optional[RequestOptions] = None,
     ) -> AsyncPager[SessionEventItem, ListSessionEventsResponse]:
         """
-        List session events as `{ turn_id, event }` across the active turn branch (newest first), including persisted events from a running tip. Each turn contributes turn.created, content events (model.message, tool.call, …), and turn.done when terminal; streaming deltas are not included. Use `page_token` to paginate backward toward older events while retaining the original branch anchor. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        List session events as `{ turn_id, event }` across the active turn branch (newest first), including persisted events from a running tip. Each turn contributes turn.created, content events (model.message, tool.call, …), and turn.done when terminal; streaming deltas are not included. Use `page_token` to paginate backward toward older events while retaining the original branch anchor. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------
@@ -2341,7 +2816,7 @@ class AsyncRawSessionsClient:
         request_options: typing.Optional[RequestOptions] = None,
     ) -> AsyncPager[Turn, ListTurnsResponse]:
         """
-        List turns for a session (newest first by default), token-paginated. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        List turns for a session (newest first by default), token-paginated. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------
@@ -2773,7 +3248,7 @@ class AsyncRawSessionsClient:
         self, *, session_id: str, turn_id: str, request_options: typing.Optional[RequestOptions] = None
     ) -> AsyncHttpResponse[GetTurnResponse]:
         """
-        Fetch a single turn by ID. Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        Fetch a single turn by ID. Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------
@@ -2985,7 +3460,7 @@ class AsyncRawSessionsClient:
         request_options: typing.Optional[RequestOptions] = None,
     ) -> AsyncPager[SessionEvent, ListTurnEventsResponse]:
         """
-        Paginated persisted events for a turn (insertion order by default). Allowed for the creator, a manager of the bound named agent, or any tenant member when the session is shared.
+        Paginated persisted events for a turn (insertion order by default). Allowed for the creator, a manager of the bound named agent, a user the session is shared with, or any tenant member when the session is shared.
 
         Parameters
         ----------
