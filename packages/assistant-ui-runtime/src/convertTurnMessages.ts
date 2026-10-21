@@ -8,6 +8,7 @@ import type {
 } from '@assistant-ui/core';
 import type {
   McpAuthRequiredEvent,
+  SessionEventItem,
   Turn,
   TurnCreatedEvent,
   TurnEvent,
@@ -452,7 +453,7 @@ export function prependFoldState(older: PeerThreadFoldState, newer: PeerThreadFo
  */
 function ingestSessionEventsIntoSnapshot(
   snapshot: SessionSnapshot,
-  items: GatewaySessionEventItem[],
+  items: readonly GatewaySessionEventItem[],
   onTurnComplete?: (snap: SessionSnapshot) => void,
 ): void {
   let currentTurnId: string | null = null;
@@ -1524,6 +1525,13 @@ export async function buildTurnAssistantContent(
   const afterIds = state.threads.get(ROOT_THREAD_ID)?.modelMessageIds ?? [];
   const rootModelMessageIds = afterIds.slice(beforeCount);
   return buildTurnUpdateFromFold(state, turn, rootModelMessageIds).content;
+}
+
+/** Projects a chronological event list that is already loaded. Does not fetch. */
+export function projectSessionEventItems(items: readonly SessionEventItem[]): ThreadMessage[] {
+  const snapshot = createEmptySessionSnapshot();
+  ingestSessionEventsIntoSnapshot(snapshot, items);
+  return projectSessionMessages(snapshot);
 }
 
 export async function convertTurnsToThreadMessages(

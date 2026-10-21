@@ -10,6 +10,7 @@ export {
   convertTurnsToThreadMessages,
   getTurnMessageContent,
   parseTurnIdFromMessageId,
+  projectSessionEventItems,
   repositoryItemsFromMessages,
 } from './convertTurnMessages.js';
 export type { ConvertTurnsResult, UserMessageContent } from './convertTurnMessages.js';
