@@ -1,5 +1,16 @@
 # @truefoundry/trueforge-core
 
+## 0.180.0-rc.1
+
+### Patch Changes
+
+- 5dd0089: Fail the turn with an explanatory error (`Output blocked: the model's content safety filter stopped the response. Rephrase the request and retry.`) when the content filter stops the response, instead of finishing with empty output.
+- 36a0bfa: Preserve supervisord ENTRYPOINT on Daytona custom-environment buildInfo snapshots so the sandbox NATS bridge starts (Daytona otherwise defaults to sleep infinity).
+- 26c77c4: Add optional AgentSpec-shaped `model` (`{ name: provider/model, params? }`) on `model.message` events, stamp it from the bound agent definition for new turns, and backfill the session tip turn's events / turn output from the session agent model FQN.
+- be2bb87: When a model stops at its output token limit, fail the turn with `Output truncated: hit the <N> token limit. Raise max_tokens and retry.` (or "the provider's default token limit" when none was sent) instead of `max_tokens breached`. The tokens used are included when they differ from the limit.
+- 248e768: Enable fine-grained tool streaming via TrueFoundry `anthropic-beta` header and Anthropic `toolStreaming`, and report invalid tool-arg JSON as a distinct parse error
+- 05cef0b: Add 502 and 503 status codes to SSRF fetch retry logic. These errors indicate temporary upstream failures and are now eligible for automatic retries across model, MCP, and outbound fetch operations.
+
 ## 0.179.0
 
 ### Patch Changes
