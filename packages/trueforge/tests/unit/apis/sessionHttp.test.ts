@@ -1,6 +1,7 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { AgentSpecSchema, Sessions } from '@truefoundry/trueforge-core/agent-session';
 import { RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
+import type { Transaction } from 'kysely';
 import { createClient } from 'redis';
 import { createLogger } from 'winston';
 import { makeCreateTurnInput } from '../../../../trueforge-core/tests/agent-session/testHelpers';
@@ -13,8 +14,10 @@ import {
 import { createTurnsRouter } from '../../../src/apis/turns';
 import { TrueForgeAuthorizer, type Authorizer } from '../../../src/auth/authorizer';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { EmptyUserDirectory } from '../../../src/auth/userDirectory';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
+import { SqliteAccessControlEntryStore } from '../../../src/db/sqlite/access-control-entry-store/SqliteAccessControlEntryStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
@@ -25,6 +28,7 @@ import { SqliteSessionMetricsStore } from '../../../src/db/sqlite/session-metric
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
+import type { Database } from '../../../src/db/sqlite/types';
 import { SqliteWebSearchProviderStore } from '../../../src/db/sqlite/web-search-provider-store/SqliteWebSearchProviderStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
@@ -75,7 +79,7 @@ describe('sessions HTTP agent binding', () => {
   let agentStore: SqliteAgentStore;
   let sessionStore: SqliteSessionStore;
   let sessionMetricsStore: SqliteSessionMetricsStore;
-  let sessionDeps: SessionsRouterDeps;
+  let sessionDeps: SessionsRouterDeps<Transaction<Database>>;
   let resolveModelProviderStore: jest.Mock;
   let resolveMcpServerStore: jest.Mock;
   let resolveSkillStore: jest.Mock;
@@ -114,9 +118,12 @@ describe('sessions HTTP agent binding', () => {
     resolveModelProviderStore = jest.fn(() => modelProviderStore);
     resolveMcpServerStore = jest.fn(() => mcpServerStore);
     resolveSkillStore = jest.fn(() => skillStore);
-    const deps: SessionsRouterDeps = {
+    const deps: SessionsRouterDeps<Transaction<Database>> = {
       sessions,
       sessionStore,
+      accessControlEntryStore: new SqliteAccessControlEntryStore(db),
+      userDirectory: new EmptyUserDirectory(),
+      withTransaction: callback => db.transaction().execute(callback),
       activeTurns: new ActiveTurnRegistry(),
       resolveModelProviderStore,
       resolveMcpServerStore,

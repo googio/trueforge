@@ -31,21 +31,27 @@ import { z } from 'zod';
 import type { ResolveSkillStoreInput } from '../app';
 import type { Authorizer } from '../auth/authorizer';
 import { createdBySubjectFromRequestContext, type RequestContext, type ResolveRequestContext } from '../auth/identity';
+import type { UserDirectory } from '../auth/userDirectory';
 import configuration from '../config';
+import type { IAccessControlEntryStore, SessionAccessRecord } from '../db/accessControlEntryStore';
 import type { IAgentStore } from '../db/agentStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { ISandboxEnvironmentStore } from '../db/sandboxEnvironmentStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { ISkillStore } from '../db/skillStore';
+import type { WithTransaction } from '../db/transaction';
 import type { IWebSearchProviderStore } from '../db/webSearchProviderStore';
 import { updateLogContext } from '../logger';
 import {
   cancelSessionRoute,
+  createSessionAccessRoute,
   createSessionRoute,
+  deleteSessionAccessRoute,
   deleteSessionRoute,
   getOrCreateSessionByExternalIdRoute,
   getSessionRoute,
+  listSessionAccessRoute,
   listSessionEventsRoute,
   listSessionsRoute,
   updateSessionRoute,
@@ -54,6 +60,7 @@ import type { ActiveTurnRegistry } from '../runtime/activeTurns';
 import { validateAgentSpec } from '../runtime/sessionResources';
 import { honoQueriesToRecord } from '../schemas/deepObjectQuery';
 import { isSessionAgentNameRef, parseListSessionsQuery, type Session } from '../schemas/session';
+import type { SessionAccessGrant, SessionAccessSubject } from '../schemas/sessionAccess';
 import { newId } from '../utils/id';
 import { agentIfAccessible, canReadAgentBoundResource, canReadSession, resolveManagedAgentIds } from './agentAccess';
 
@@ -84,9 +91,12 @@ export function toWireSession(record: SessionRecord): Session {
   };
 }
 
-export interface SessionsRouterDeps {
+export interface SessionsRouterDeps<TTransaction = never> {
   sessions: Sessions;
   sessionStore: ISessionStore;
+  accessControlEntryStore: IAccessControlEntryStore<TTransaction>;
+  userDirectory: UserDirectory;
+  withTransaction: WithTransaction<TTransaction>;
   activeTurns: ActiveTurnRegistry;
   resolveModelProviderStore: (input: { c: Context; allowInlineResources?: boolean }) => IModelProviderStore;
   resolveMcpServerStore: (input: { c: Context; allowInlineResources?: boolean }) => IMcpServerStore;
@@ -250,6 +260,58 @@ function isSessionOwner({
   return subject_id === created_by_subject.subject_id;
 }
 
+const FORBIDDEN_SESSION_ACCESS_MANAGEMENT = 'Only the session creator can manage access to this session';
+
+/** Session the caller created; 404 when missing, 403 for anyone else. */
+async function requireOwnedSession(
+  deps: Pick<SessionsRouterDeps, 'sessionStore' | 'resolveRequestContext'>,
+  input: { c: Context; session_id: string },
+): Promise<{ requestContext: RequestContext; record: SessionRecord }> {
+  const requestContext = deps.resolveRequestContext(input.c);
+  const record = await deps.sessionStore.getSession({
+    tenant_id: requestContext.tenant_id,
+    session_id: input.session_id,
+  });
+  if (!record) {
+    throw new HTTPException(404, { message: `Session not found: ${input.session_id}` });
+  }
+  if (!isSessionOwner({ subject_id: requestContext.subject.id, created_by_subject: record.created_by_subject })) {
+    throw new HTTPException(403, { message: FORBIDDEN_SESSION_ACCESS_MANAGEMENT });
+  }
+  return { requestContext, record };
+}
+
+function uniqueSubjects(subjects: readonly SessionAccessSubject[]): SessionAccessSubject[] {
+  const byKey = new Map<string, SessionAccessSubject>();
+  for (const subject of subjects) {
+    byKey.set(`${subject.subject_type}:${subject.subject_id}`, subject);
+  }
+  return [...byKey.values()];
+}
+
+/** One directory lookup for all grantees; unresolvable users keep their grant with null details. */
+async function toWireGrants(
+  userDirectory: UserDirectory,
+  input: { records: readonly SessionAccessRecord[]; context: RequestContext },
+): Promise<SessionAccessGrant[]> {
+  const users = await userDirectory.getUsersByIds({
+    context: input.context,
+    ids: input.records.map(record => record.subject_id),
+  });
+  const userById = new Map(users.map(user => [user.id, user]));
+  return input.records.map(record => {
+    const user = userById.get(record.subject_id);
+    return {
+      subject_type: record.subject_type,
+      subject_id: record.subject_id,
+      subject_display_name: user?.display_name ?? null,
+      subject_email: user?.email ?? null,
+      granted_by_subject: record.granted_by_subject,
+      created_at: record.created_at,
+    };
+  });
+}
+
 /**
  * Inline create and spec replace check model, MCP, and skill names against `x-tfg-*` when those
  * headers are present. The headers are not written onto the session.
@@ -374,7 +436,7 @@ export function createInternalSessionsRouter(deps: InternalSessionsRouterDeps) {
 }
 
 /** DB-backed sessions (mounted at /api/v1/sessions). */
-export function createSessionsRouter(deps: SessionsRouterDeps) {
+export function createSessionsRouter<TTransaction>(deps: SessionsRouterDeps<TTransaction>) {
   const createSessionHandler: RouteHandler<typeof createSessionRoute> = async c => {
     const body = c.req.valid('json');
     const sessionId = newId();
@@ -644,6 +706,65 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
     }
   };
 
+  const listSessionAccessHandler: RouteHandler<typeof listSessionAccessRoute> = async c => {
+    const { session_id: sessionId } = c.req.valid('param');
+    const { requestContext } = await requireOwnedSession(deps, { c, session_id: sessionId });
+    const records = await deps.accessControlEntryStore.listSessionAccess({
+      tenant_id: requestContext.tenant_id,
+      session_id: sessionId,
+    });
+    return c.json({ data: await toWireGrants(deps.userDirectory, { records, context: requestContext }) }, 200);
+  };
+
+  const createSessionAccessHandler: RouteHandler<typeof createSessionAccessRoute> = async c => {
+    const { session_id: sessionId } = c.req.valid('param');
+    const body = c.req.valid('json');
+    const { requestContext } = await requireOwnedSession(deps, { c, session_id: sessionId });
+    const subjects = uniqueSubjects(body.subjects);
+    if (subjects.some(subject => subject.subject_id === requestContext.subject.id)) {
+      throw new HTTPException(422, { message: 'The session creator already has access.' });
+    }
+    const knownUsers = await deps.userDirectory.getUsersByIds({
+      context: requestContext,
+      ids: subjects.map(subject => subject.subject_id),
+    });
+    const knownIds = new Set(knownUsers.map(user => user.id));
+    const unknownIds = subjects.filter(subject => !knownIds.has(subject.subject_id)).map(subject => subject.subject_id);
+    if (unknownIds.length > 0) {
+      throw new HTTPException(422, { message: `Unknown users: ${unknownIds.join(', ')}` });
+    }
+    await deps.withTransaction(transaction =>
+      deps.accessControlEntryStore.grantSessionAccess(
+        {
+          tenant_id: requestContext.tenant_id,
+          session_id: sessionId,
+          subjects,
+          granted_by_subject: createdBySubjectFromRequestContext(requestContext),
+        },
+        transaction,
+      ),
+    );
+    const records = await deps.accessControlEntryStore.listSessionAccess({
+      tenant_id: requestContext.tenant_id,
+      session_id: sessionId,
+    });
+    return c.json({ data: await toWireGrants(deps.userDirectory, { records, context: requestContext }) }, 201);
+  };
+
+  const deleteSessionAccessHandler: RouteHandler<typeof deleteSessionAccessRoute> = async c => {
+    const { session_id: sessionId, subject_type, subject_id } = c.req.valid('param');
+    const { requestContext } = await requireOwnedSession(deps, { c, session_id: sessionId });
+    const revoked = await deps.accessControlEntryStore.revokeSessionAccess({
+      tenant_id: requestContext.tenant_id,
+      session_id: sessionId,
+      subject: { subject_type, subject_id },
+    });
+    if (!revoked) {
+      return c.json({ error: { message: 'No matching grant found.' } }, 404);
+    }
+    return c.json({}, 200);
+  };
+
   const router = new OpenAPIHono();
   router.openapi(createSessionRoute, createSessionHandler);
   router.openapi(getSessionRoute, getSessionHandler);
@@ -652,6 +773,9 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
   router.openapi(listSessionsRoute, listSessionsHandler);
   router.openapi(cancelSessionRoute, cancelSessionHandler);
   router.openapi(listSessionEventsRoute, listSessionEventsHandler);
+  router.openapi(listSessionAccessRoute, listSessionAccessHandler);
+  router.openapi(createSessionAccessRoute, createSessionAccessHandler);
+  router.openapi(deleteSessionAccessRoute, deleteSessionAccessHandler);
   deps.requestReplyRouter.registerRoute(SESSIONS_CANCEL_PATH, cancelSessionTurnPeerHandler(deps.activeTurns));
   return router;
 }
