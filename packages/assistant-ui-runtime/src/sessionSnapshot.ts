@@ -74,6 +74,11 @@ export interface SessionSnapshot {
    */
   historyEvents?: readonly GatewaySessionEventItem[] | undefined;
   historyPagination?: SessionHistoryPagination | undefined;
+  /**
+   * Tail of a turn whose `turn.created` is still on an older `listEvents` page.
+   * Kept so prepend can stitch it; otherwise that turn is dropped.
+   */
+  pendingBoundaryEvents?: readonly GatewaySessionEventItem[] | undefined;
 }
 
 export interface ProjectSessionMessagesOptions {

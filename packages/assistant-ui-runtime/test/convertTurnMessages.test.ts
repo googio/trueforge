@@ -3613,6 +3613,134 @@ describe('buildSnapshotFromSessionEvents', () => {
       metadata: { custom: { sandboxId: 'sbx-123', turnId: 't2' } },
     });
   });
+
+  it('keeps a turn whose turn.done landed on the newer event page', async () => {
+    const makeTurnItems = (id: string, text: string): SessionEventItem[] => [
+      {
+        turnId: id,
+        event: {
+          type: 'turn.created',
+          id: `evt-c-${id}`,
+          turnId: id,
+          input: [{ type: 'user.message', content: text }],
+          state: { status: 'running' },
+          createdAt,
+        },
+      },
+      {
+        turnId: id,
+        event: modelMessage({
+          id: `m-${id}`,
+          threadId: ROOT_THREAD_ID,
+          content: `reply ${text}`,
+        }),
+      },
+      {
+        turnId: id,
+        event: turnDone(`evt-d-${id}`),
+      },
+    ];
+
+    // 3 events per turn. pageSize 4 puts t1's turn.done on the newest page beside all of t2,
+    // and leaves t1's turn.created on the next page.
+    const items = [...makeTurnItems('t1', 'older'), ...makeTurnItems('t2', 'newer')];
+    const listEvents = vi.fn(sessionEventsPage(items, { pageSize: 4 }));
+    const server = {
+      listTurns: async () => ({ data: [] }),
+      listEvents,
+      listTurnEvents: async () => ({ data: [] }),
+    } as unknown as AgentChatServer;
+
+    const snapshot = await buildSnapshotFromSessionEvents(server, SESSION_ID);
+
+    expect(listEvents).toHaveBeenCalledTimes(2);
+    expect(snapshot.turns.map(turn => turn.id)).toEqual(['t1', 't2']);
+    expect(snapshot.pendingBoundaryEvents).toBeUndefined();
+    expect(snapshot.historyPagination?.hasOlder).toBe(false);
+    expect(projectSessionMessages(snapshot).filter(message => message.role === 'user')).toEqual([
+      expect.objectContaining({ content: [{ type: 'text', text: 'older' }] }),
+      expect.objectContaining({ content: [{ type: 'text', text: 'newer' }] }),
+    ]);
+  });
+
+  it('stitches a turn that still crosses the history page cap', async () => {
+    // Sized for MAX_HISTORY_BOUNDARY_PAGES (10) and pageSize 3: the newest page holds
+    // t2 plus t1's turn.done, and t1's turn.created is the single event past the cap.
+    const fillerCount = 25;
+    const t1Items: SessionEventItem[] = [
+      {
+        turnId: 't1',
+        event: {
+          type: 'turn.created',
+          id: 'evt-c-t1',
+          turnId: 't1',
+          input: [{ type: 'user.message', content: 'older' }],
+          state: { status: 'running' },
+          createdAt,
+        },
+      },
+      {
+        turnId: 't1',
+        event: modelMessage({ id: 'm-t1-head', threadId: ROOT_THREAD_ID, content: 'from-head' }),
+      },
+      ...Array.from({ length: fillerCount }, (_unused, index) => ({
+        turnId: 't1',
+        event: modelMessage({
+          id: `m-t1-${String(index)}`,
+          threadId: ROOT_THREAD_ID,
+          content: `filler ${String(index)}`,
+        }),
+      })),
+      {
+        turnId: 't1',
+        event: modelMessage({ id: 'm-t1-tail', threadId: ROOT_THREAD_ID, content: 'from-tail' }),
+      },
+      {
+        turnId: 't1',
+        event: turnDone('evt-d-t1'),
+      },
+    ];
+    const t2Items: SessionEventItem[] = [
+      {
+        turnId: 't2',
+        event: {
+          type: 'turn.created',
+          id: 'evt-c-t2',
+          turnId: 't2',
+          input: [{ type: 'user.message', content: 'newer' }],
+          state: { status: 'running' },
+          createdAt,
+        },
+      },
+      {
+        turnId: 't2',
+        event: turnDone('evt-d-t2'),
+      },
+    ];
+    const listEvents = vi.fn(sessionEventsPage([...t1Items, ...t2Items], { pageSize: 3 }));
+    const server = {
+      listTurns: async () => ({ data: [] }),
+      listEvents,
+      listTurnEvents: async () => ({ data: [] }),
+    } as unknown as AgentChatServer;
+
+    const snapshot = await buildSnapshotFromSessionEvents(server, SESSION_ID);
+
+    expect(listEvents).toHaveBeenCalledTimes(10);
+    expect(snapshot.turns.map(turn => turn.id)).toEqual(['t2']);
+    expect(snapshot.pendingBoundaryEvents?.some(item => item.event.type === 'turn.created')).toBe(false);
+    expect(snapshot.pendingBoundaryEvents?.some(item => item.event.type === 'turn.done')).toBe(true);
+
+    const withOlder = await prependOlderSessionHistory(server, SESSION_ID, snapshot);
+
+    expect(withOlder.turns.map(turn => turn.id)).toEqual(['t1', 't2']);
+    expect(withOlder.pendingBoundaryEvents).toBeUndefined();
+    expect(withOlder.historyPagination?.hasOlder).toBe(false);
+    const assistantText = projectSessionMessages(withOlder).flatMap(message =>
+      message.role === 'assistant' ? message.content.flatMap(part => (part.type === 'text' ? [part.text] : [])) : [],
+    );
+    expect(assistantText).toEqual(expect.arrayContaining(['from-head', 'from-tail']));
+  });
 });
 
 describe('buildSnapshotThroughTurn', () => {

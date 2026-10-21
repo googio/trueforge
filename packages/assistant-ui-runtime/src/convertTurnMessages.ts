@@ -214,15 +214,27 @@ interface SessionEventsPageResult {
 }
 
 /**
- * Drops a leading incomplete turn (events before the first `turn.created`) that
- * appears when a page boundary splits a turn.
+ * Splits a chronological window at its first `turn.created`.
+ * The prefix is the tail of a turn that started on an older page. Dropping it
+ * loses that turn once its `turn.done` sits in this window.
  */
-function trimIncompleteLeadingEvents(itemsAsc: GatewaySessionEventItem[]): GatewaySessionEventItem[] {
+function splitAtFirstTurnCreated(itemsAsc: GatewaySessionEventItem[]): {
+  itemsAsc: GatewaySessionEventItem[];
+  discardedPrefix: GatewaySessionEventItem[];
+} {
   const start = itemsAsc.findIndex(item => item.event.type === 'turn.created');
-  if (start === -1) {
-    return [];
+  if (start === 0) {
+    return { itemsAsc, discardedPrefix: [] };
   }
-  return itemsAsc.slice(start);
+  if (start === -1) {
+    return { itemsAsc: [], discardedPrefix: itemsAsc };
+  }
+  return { itemsAsc: itemsAsc.slice(start), discardedPrefix: itemsAsc.slice(0, start) };
+}
+
+/** Drops events before the first `turn.created` when a page boundary splits a turn. */
+function trimIncompleteLeadingEvents(itemsAsc: GatewaySessionEventItem[]): GatewaySessionEventItem[] {
+  return splitAtFirstTurnCreated(itemsAsc).itemsAsc;
 }
 
 /**
@@ -269,7 +281,10 @@ async function fetchSessionEventsPage(
 
 /**
  * Fetches pages until the chronological window starts on a complete user-message
- * turn group (or history is exhausted).
+ * turn and nothing was trimmed before that turn (or history / the page cap is exhausted).
+ *
+ * `discardedPrefix` is the tail of a turn whose `turn.created` is still on an
+ * older page. A non-empty prefix keeps paging so that turn is not dropped.
  */
 async function fetchSessionEventsWindow(
   server: AgentChatServer,
@@ -277,6 +292,7 @@ async function fetchSessionEventsWindow(
   options?: FetchSessionEventsOptions & { pageToken?: string },
 ): Promise<{
   itemsAsc: GatewaySessionEventItem[];
+  discardedPrefix: GatewaySessionEventItem[];
   olderPageToken?: string;
   hasOlder: boolean;
 }> {
@@ -284,6 +300,17 @@ async function fetchSessionEventsWindow(
   let pageToken = options?.pageToken;
   let olderPageToken: string | undefined;
   let hasOlder = false;
+
+  const toWindow = (newestFirst: GatewaySessionEventItem[]) => {
+    const split = splitAtFirstTurnCreated([...newestFirst].reverse());
+    // Once history is exhausted, a leading fragment can never gain its turn.created.
+    return {
+      itemsAsc: split.itemsAsc,
+      discardedPrefix: hasOlder ? split.discardedPrefix : [],
+      ...(olderPageToken != null ? { olderPageToken } : {}),
+      hasOlder,
+    };
+  };
 
   for (let pageCount = 0; pageCount < MAX_HISTORY_BOUNDARY_PAGES; pageCount++) {
     const page = await fetchSessionEventsPage(server, sessionId, {
@@ -294,28 +321,16 @@ async function fetchSessionEventsWindow(
     olderPageToken = page.olderPageToken;
     hasOlder = page.hasOlder;
 
-    const itemsAsc = trimIncompleteLeadingEvents([...itemsNewestFirst].reverse());
-    const groupState = oldestCompleteTurnGroupState(itemsAsc);
-    if (groupState === 'user-group' || !hasOlder) {
-      return {
-        itemsAsc,
-        ...(olderPageToken != null ? { olderPageToken } : {}),
-        hasOlder,
-      };
-    }
-
-    if (olderPageToken == null) {
-      return { itemsAsc, hasOlder: false };
+    const split = splitAtFirstTurnCreated([...itemsNewestFirst].reverse());
+    const groupState = oldestCompleteTurnGroupState(split.itemsAsc);
+    const boundarySplit = split.discardedPrefix.length > 0 && hasOlder;
+    if ((groupState === 'user-group' && !boundarySplit) || !hasOlder || olderPageToken == null) {
+      return toWindow(itemsNewestFirst);
     }
     pageToken = olderPageToken;
   }
 
-  const itemsAsc = trimIncompleteLeadingEvents([...itemsNewestFirst].reverse());
-  return {
-    itemsAsc,
-    ...(olderPageToken != null ? { olderPageToken } : {}),
-    hasOlder,
-  };
+  return toWindow(itemsNewestFirst);
 }
 
 /**
@@ -603,8 +618,10 @@ async function resolveSessionTip(options: {
 /**
  * Builds a session snapshot using the session-level `listEvents` API.
  *
- * Loads the newest event page (extending only when a page boundary splits a
- * turn group), then leaves older pages for `prependOlderSessionHistory`.
+ * Loads the newest event page, extending while a boundary splits a turn
+ * (including a tail that begins before the page's first `turn.created`).
+ * A tail that still exceeds the page cap is kept on the snapshot and stitched
+ * by `prependOlderSessionHistory`. Older complete turns stay on that path.
  * Detects a currently-running tip from an open `turn.created` in that window
  * when present; otherwise falls back to `listTurns({ limit: 1 })` for hosts
  * that omit the running turn from listEvents.
@@ -629,6 +646,7 @@ export async function buildSnapshotFromSessionEvents(
   const withHistory = replaceSessionSnapshot(snapshot, {
     historyEvents: window.itemsAsc,
     historyPagination,
+    ...(window.discardedPrefix.length > 0 ? { pendingBoundaryEvents: window.discardedPrefix } : {}),
   });
 
   const tip = await resolveSessionTip({
@@ -660,19 +678,33 @@ export async function prependOlderSessionHistory(
   const window = await fetchSessionEventsWindow(server, sessionId, {
     pageToken: pagination.olderPageToken,
   });
+  const heldBoundary = snapshot.pendingBoundaryEvents ?? [];
+  // No turn.created in this window yet — carry the unfinished tail to the next page.
   if (window.itemsAsc.length === 0) {
+    const carried = [...window.discardedPrefix, ...heldBoundary];
+    const nextToken = window.olderPageToken;
+    if (window.hasOlder && nextToken != null && carried.length > 0) {
+      return replaceSessionSnapshot(snapshot, {
+        historyPagination: { hasOlder: true, olderPageToken: nextToken },
+        pendingBoundaryEvents: carried,
+      });
+    }
     return replaceSessionSnapshot(snapshot, {
       historyPagination: { hasOlder: false },
+      pendingBoundaryEvents: undefined,
     });
   }
 
+  // Held events are the chronological continuation of this window (its turn.done
+  // lived on the newer page that was trimmed). Ingest them as one sequence.
+  const stitched = heldBoundary.length > 0 ? [...window.itemsAsc, ...heldBoundary] : window.itemsAsc;
   const olderSnap = createEmptySessionSnapshot();
-  ingestSessionEventsIntoSnapshot(olderSnap, window.itemsAsc);
+  ingestSessionEventsIntoSnapshot(olderSnap, stitched);
 
   const existingIds = new Set(snapshot.turns.map(turn => turn.id));
   const olderTurns = olderSnap.turns.filter(turn => !existingIds.has(turn.id));
   const mergedFold = prependFoldState(olderSnap.fold, snapshot.fold);
-  const historyEvents = [...window.itemsAsc, ...(snapshot.historyEvents ?? [])];
+  const historyEvents = [...stitched, ...(snapshot.historyEvents ?? [])];
   const olderRootIds = olderTurns.flatMap(turn => turn.rootModelMessageIds ?? []);
 
   // Forward-propagate sandbox identity revealed by older pages onto
@@ -698,6 +730,7 @@ export async function prependOlderSessionHistory(
       hasOlder: window.hasOlder,
       ...(window.olderPageToken != null ? { olderPageToken: window.olderPageToken } : {}),
     },
+    pendingBoundaryEvents: window.discardedPrefix.length > 0 ? window.discardedPrefix : undefined,
     ...(snapshot.groupRootBaseline != null
       ? {
           groupRootBaseline: [...olderRootIds, ...snapshot.groupRootBaseline],
