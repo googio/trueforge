@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.180.0-rc.3
+
+### Patch Changes
+
+- 58d7159: Dense Agents library rows: nest creator under the name, two-line configuration, and per-page sessions/spend/14d sparkline/last-run when metrics are available.
+- 58d7159: Keep the Build Agent config when starting a new chat, confirm before Reset, and honor a stored sandbox environment name.
+- 58d7159: Route shared-session viewers to the read-only session view and hide in-flight turns.
+- 58d7159: Show check and triangle-alert icons on sandbox environment Ready and Failed status badges.
+
 ## 0.180.0-rc.2
 
 ### Patch Changes
