@@ -34,7 +34,10 @@ export interface RevokeSessionAccessInput {
 export interface IAccessControlEntryStore<TTransaction = never> {
   /** Ordered by (created_at, subject_id). */
   listSessionAccess(input: ListSessionAccessInput, transaction?: TTransaction): Promise<SessionAccessRecord[]>;
-  /** Inserts the subjects; existing grants are left untouched. Rejects when the session does not exist. */
+  /**
+   * Inserts the subjects in one statement, so either all land or none do; existing grants are left
+   * untouched. Rejects when the session does not exist.
+   */
   grantSessionAccess(input: GrantSessionAccessInput, transaction?: TTransaction): Promise<void>;
   /** Deletes one grant; false when it did not exist. */
   revokeSessionAccess(input: RevokeSessionAccessInput, transaction?: TTransaction): Promise<boolean>;

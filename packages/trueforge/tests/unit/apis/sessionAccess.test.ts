@@ -86,7 +86,6 @@ function buildApp(input: { db: Kysely<Database>; sessionStore: SqliteSessionStor
       sessionStore,
       accessControlEntryStore: new SqliteAccessControlEntryStore(db),
       userDirectory,
-      withTransaction: callback => db.transaction().execute(callback),
       activeTurns: new ActiveTurnRegistry(),
       resolveModelProviderStore: () => new SqliteModelProviderStore(db),
       resolveMcpServerStore: () => new SqliteMcpServerStore(db),
