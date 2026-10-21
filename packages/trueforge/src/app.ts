@@ -588,7 +588,6 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         sessionStore: deps.sessionStore,
         accessControlEntryStore: deps.accessControlEntryStore,
         userDirectory: deps.userDirectory,
-        withTransaction: deps.withTransaction,
         activeTurns: deps.activeTurns,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,

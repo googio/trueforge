@@ -40,7 +40,6 @@ import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { ISandboxEnvironmentStore } from '../db/sandboxEnvironmentStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { ISkillStore } from '../db/skillStore';
-import type { WithTransaction } from '../db/transaction';
 import type { IWebSearchProviderStore } from '../db/webSearchProviderStore';
 import { updateLogContext } from '../logger';
 import {
@@ -91,12 +90,11 @@ export function toWireSession(record: SessionRecord): Session {
   };
 }
 
-export interface SessionsRouterDeps<TTransaction = never> {
+export interface SessionsRouterDeps {
   sessions: Sessions;
   sessionStore: ISessionStore;
-  accessControlEntryStore: IAccessControlEntryStore<TTransaction>;
+  accessControlEntryStore: IAccessControlEntryStore;
   userDirectory: UserDirectory;
-  withTransaction: WithTransaction<TTransaction>;
   activeTurns: ActiveTurnRegistry;
   resolveModelProviderStore: (input: { c: Context; allowInlineResources?: boolean }) => IModelProviderStore;
   resolveMcpServerStore: (input: { c: Context; allowInlineResources?: boolean }) => IMcpServerStore;
@@ -436,7 +434,7 @@ export function createInternalSessionsRouter(deps: InternalSessionsRouterDeps) {
 }
 
 /** DB-backed sessions (mounted at /api/v1/sessions). */
-export function createSessionsRouter<TTransaction>(deps: SessionsRouterDeps<TTransaction>) {
+export function createSessionsRouter(deps: SessionsRouterDeps) {
   const createSessionHandler: RouteHandler<typeof createSessionRoute> = async c => {
     const body = c.req.valid('json');
     const sessionId = newId();
@@ -733,17 +731,12 @@ export function createSessionsRouter<TTransaction>(deps: SessionsRouterDeps<TTra
     if (unknownIds.length > 0) {
       throw new HTTPException(422, { message: `Unknown users: ${unknownIds.join(', ')}` });
     }
-    await deps.withTransaction(transaction =>
-      deps.accessControlEntryStore.grantSessionAccess(
-        {
-          tenant_id: requestContext.tenant_id,
-          session_id: sessionId,
-          subjects,
-          granted_by_subject: createdBySubjectFromRequestContext(requestContext),
-        },
-        transaction,
-      ),
-    );
+    await deps.accessControlEntryStore.grantSessionAccess({
+      tenant_id: requestContext.tenant_id,
+      session_id: sessionId,
+      subjects,
+      granted_by_subject: createdBySubjectFromRequestContext(requestContext),
+    });
     const records = await deps.accessControlEntryStore.listSessionAccess({
       tenant_id: requestContext.tenant_id,
       session_id: sessionId,
