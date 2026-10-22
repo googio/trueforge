@@ -117,15 +117,15 @@ jobs:
           EOF
 
   # AGENTS.md: PRs that change published-package code MUST include a .changeset/*.md.
-  # SDK regen and bot authors are excluded (they add their own changeset).
+  # Diffs the package dirs directly: the detect-changes filters also match root and CI
+  # files, which AGENTS.md exempts. trueforge-sdk is excluded (generated; regen adds its
+  # own changeset), as are tests and markdown.
   changeset-check:
     name: Changeset required
-    needs: detect-changes
     if: >
       github.event_name == 'pull_request' &&
-      needs.detect-changes.outputs.packages != '[]' &&
-      github.actor != 'trueforge-dev-bot[bot]' &&
-      github.actor != 'dependabot[bot]'
+      github.event.pull_request.user.login != 'trueforge-dev-bot[bot]' &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -133,11 +133,22 @@ jobs:
         with:
           fetch-depth: 0
       - name: Check for a changeset
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          # A .changeset/*.md that is not README.md must exist in the diff
-          changesets=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- '.changeset/*.md' | grep -v README.md || true)
+          code=$(git diff --name-only "origin/${BASE_REF}...HEAD" -- \
+              packages/assistant-ui-runtime packages/trueforge-core packages/trueforge \
+              packages/trueforge-ui packages/frontend \
+            | grep -vE '/(tests?|__tests__)/|\.md$' || true)
+          if [ -z "$code" ]; then
+            echo "No published-package code changed; no changeset needed."
+            exit 0
+          fi
+          changesets=$(git diff --name-only --diff-filter=A "origin/${BASE_REF}...HEAD" -- '.changeset/*.md' | grep -v README.md || true)
           if [ -z "$changesets" ]; then
-            echo "::error::This PR changes published-package code but has no .changeset/*.md file. Run 'pnpm changeset' to add one (patch only)."
+            echo "::error::This PR changes published-package code but adds no .changeset/*.md. Run 'pnpm changeset' (patch only)."
+            echo "Changed package files:"
+            echo "$code"
             exit 1
           fi
           echo "Found changeset(s):"
