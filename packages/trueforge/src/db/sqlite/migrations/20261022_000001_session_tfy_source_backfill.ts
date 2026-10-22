@@ -1,0 +1,23 @@
+import { sql, type Kysely } from 'kysely';
+
+/**
+ * SQLite mirror of postgres/migrations/20261022_000001_session_tfy_source_backfill.ts.
+ * The key contains a dot, so JSON paths must quote it.
+ */
+export async function up<TDatabase>(db: Kysely<TDatabase>): Promise<void> {
+  await db.transaction().execute(async trx => {
+    await sql`
+      UPDATE session
+      SET metadata = jsonb_set(metadata, '$."tfy.source"', 'ui')
+      WHERE source IS NULL
+        AND external_id IS NULL
+        AND json_extract(metadata, '$."tfy.source"') IS NULL
+    `.execute(trx);
+  });
+}
+
+/** Data backfill — not reversed: backfilled rows are indistinguishable from UI-stamped ones. */
+export function down(db: Kysely<unknown>): Promise<void> {
+  void db;
+  return Promise.reject(new Error('20261022_000001_session_tfy_source_backfill is irreversible'));
+}
