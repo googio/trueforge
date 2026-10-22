@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.180.0-rc.4
+
+### Patch Changes
+
+- 0a1606d: Default the reasoning effort to `medium` when the selected model offers it (falling back to the lowest real effort otherwise), instead of defaulting to the lowest effort. TrueFoundry model listing now passes `mergeParams` to the provider-integrations API so provider-level parameter defaults are included in each model's advertised parameters.
+
 ## 0.180.0-rc.3
 
 ### Patch Changes
