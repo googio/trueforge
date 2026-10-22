@@ -105,7 +105,6 @@ import { TrueForgeAuthorizer, type Authorizer } from './auth/authorizer';
 import { createAuthenticator } from './auth/createAuthenticator';
 import { resolveRequestContext, STANDALONE_REQUEST_CONTEXT, type RequestContext } from './auth/identity';
 import { initOidc } from './auth/oidc';
-import { EmptyUserDirectory, type UserDirectory } from './auth/userDirectory';
 import { McpCatalog } from './catalog/McpCatalog';
 import { ModelCatalog } from './catalog/ModelCatalog';
 import { SandboxCatalog } from './catalog/SandboxCatalog';
@@ -127,6 +126,7 @@ import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
 import type { Database as SqliteDatabase } from './db/sqlite/types';
 import type { WithTransaction } from './db/transaction';
+import { EmptyUserStore, type IUserStore } from './db/userStore';
 import type { IWebSearchProviderStore } from './db/webSearchProviderStore';
 import { mountFrontend } from './frontend';
 import type { HttpMetrics } from './http/prometheus';
@@ -170,7 +170,7 @@ import { TrueFoundrySandboxEnvironmentStore } from './truefoundry/TrueFoundrySan
 import { TrueFoundrySandboxProviderStore } from './truefoundry/TrueFoundrySandboxProviderStore';
 import { TrueFoundryServiceFoundryServerClient } from './truefoundry/TrueFoundryServiceFoundryServerClient';
 import { TrueFoundryAdminSkillStore, TrueFoundrySkillStore } from './truefoundry/TrueFoundrySkillStore';
-import { TrueFoundryUserDirectory } from './truefoundry/TrueFoundryUserDirectory';
+import { TrueFoundryUserStore } from './truefoundry/TrueFoundryUserStore';
 import { TrueFoundryWebSearchProviderStore } from './truefoundry/TrueFoundryWebSearchProviderStore';
 
 /** Persistence-layer model store resolve (RequestContext, not Hono Context). */
@@ -673,7 +673,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
 
   let authenticator;
   let authorizer: Authorizer;
-  let userDirectory: UserDirectory;
+  let userStore: IUserStore;
   const mode = getTrueForgeAuthMode(configuration);
   if (mode === TrueForgeAuthMode.TrueFoundry) {
     if (serviceFoundryClient === undefined) {
@@ -684,15 +684,15 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       serviceFoundryClient,
     });
     authorizer = new TrueFoundryAuthorizer(serviceFoundryClient);
-    userDirectory = new TrueFoundryUserDirectory(serviceFoundryClient);
+    userStore = new TrueFoundryUserStore(serviceFoundryClient);
   } else if (mode === TrueForgeAuthMode.Oidc) {
     authenticator = createAuthenticator({ mode: TrueForgeAuthMode.Oidc });
     authorizer = new TrueForgeAuthorizer();
-    userDirectory = new EmptyUserDirectory();
+    userStore = new EmptyUserStore();
   } else {
     authenticator = createAuthenticator({ mode: TrueForgeAuthMode.Standalone });
     authorizer = new TrueForgeAuthorizer();
-    userDirectory = new EmptyUserDirectory();
+    userStore = new EmptyUserStore();
   }
 
   // Standalone owns the control loops in-process; they hand off via HTTP loopback
@@ -811,7 +811,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sessionStore,
     accessControlEntryStore,
     sessionMetricsStore,
-    userDirectory,
+    userStore,
     sessions,
     activeTurns,
     redis: redis?.client,

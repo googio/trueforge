@@ -36,7 +36,6 @@ import {
   createAuthMiddleware,
   tryAuthenticate,
 } from './auth/middleware';
-import type { UserDirectory } from './auth/userDirectory';
 import type { McpCatalog } from './catalog/McpCatalog';
 import type { ModelCatalog } from './catalog/ModelCatalog';
 import type { SandboxCatalog } from './catalog/SandboxCatalog';
@@ -53,6 +52,7 @@ import type { IScheduleStore } from './db/scheduleStore';
 import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
 import type { WithTransaction } from './db/transaction';
+import type { IUserStore } from './db/userStore';
 import type { IWebSearchProviderStore } from './db/webSearchProviderStore';
 import type { HttpMetrics } from './http/prometheus';
 import { createClientCertificateMiddleware } from './http/tls';
@@ -307,7 +307,7 @@ export interface ServerDeps<TTransaction> {
   accessControlEntryStore: IAccessControlEntryStore<TTransaction>;
   sessionMetricsStore: ISessionMetricsStore;
   /** Tenant users that sessions can be shared with. */
-  userDirectory: UserDirectory;
+  userStore: IUserStore;
   /** Persistence agent store (schedule runs resolve the bound agent without an HTTP caller). */
   agentStore: IAgentStore<TTransaction>;
   /** Sandbox environment parent + version persistence (no TrueFoundry dual-write). */
@@ -384,7 +384,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   );
   app.route(
     '/api/v1/users',
-    withAuth(createUsersRouter({ userDirectory: deps.userDirectory, resolveRequestContext }), authMiddleware),
+    withAuth(createUsersRouter({ userStore: deps.userStore, resolveRequestContext }), authMiddleware),
   );
   app.route(
     '/api/v1/capabilities',
@@ -587,7 +587,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         sessions: deps.sessions,
         sessionStore: deps.sessionStore,
         accessControlEntryStore: deps.accessControlEntryStore,
-        userDirectory: deps.userDirectory,
+        userStore: deps.userStore,
         activeTurns: deps.activeTurns,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
