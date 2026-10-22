@@ -6,6 +6,7 @@ import type {
   AgentMetricMeter,
   CodeSnippet,
   CreatedBySubject,
+  TurnStatus,
 } from '../../server/types.js';
 import type { SessionMetrics } from '../../utils/buildSessionMetrics.js';
 import type { SessionEventTimelineSegment, SessionEventType } from '../../utils/sessionEventTimeline.js';
@@ -36,6 +37,8 @@ export type AgentSessionListRowProps = {
   agentName?: string;
   sourceType?: 'schedule';
   lastActivityAt: string;
+  /** Last-turn status for the leading status dot. */
+  lastTurnStatus?: TurnStatus;
   metrics: {
     totalTurns: number;
     totalCostInUsd?: number;

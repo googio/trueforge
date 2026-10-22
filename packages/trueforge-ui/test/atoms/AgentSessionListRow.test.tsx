@@ -48,4 +48,24 @@ describe('AgentSessionListRow', () => {
     fireEvent.click(screen.getByText('writer'));
     expect(onSelect).toHaveBeenCalledOnce();
   });
+
+  it('shows a running status dot after the title', () => {
+    const { container } = render(<AgentSessionListRow {...baseProps} lastTurnStatus="running" />);
+
+    expect(container.querySelector('[data-slot="session-status-dot"]')).toHaveClass('bg-indigo-500');
+  });
+
+  it('shows a failure status dot for error and cancelled', () => {
+    const { container: errorContainer } = render(<AgentSessionListRow {...baseProps} lastTurnStatus="error" />);
+    expect(errorContainer.querySelector('[data-slot="session-status-dot"]')).toHaveClass('bg-failure-bg');
+
+    const { container: cancelledContainer } = render(<AgentSessionListRow {...baseProps} lastTurnStatus="cancelled" />);
+    expect(cancelledContainer.querySelector('[data-slot="session-status-dot"]')).toHaveClass('bg-failure-bg');
+  });
+
+  it('hides the status dot when last turn is done', () => {
+    const { container } = render(<AgentSessionListRow {...baseProps} lastTurnStatus="done" />);
+
+    expect(container.querySelector('[data-slot="session-status-dot"]')).not.toBeInTheDocument();
+  });
 });

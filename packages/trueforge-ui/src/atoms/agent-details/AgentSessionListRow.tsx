@@ -8,7 +8,7 @@ import { getUserInitials } from '../UserAvatar.js';
 import { auiButtonClass } from '../lib/buttonClasses.js';
 import { cn } from '../lib/cn.js';
 import { formatAbsoluteDateTime } from '../lib/dateFormat.js';
-import { formatRelativeShort } from '../lib/threadListMeta.js';
+import { formatRelativeShort, lastTurnStatusDotClass } from '../lib/threadListMeta.js';
 import { Avatar, AvatarFallback } from '../primitives/Avatar.js';
 import { DropdownMenu, DropdownMenuItem } from '../primitives/DropdownMenu.js';
 import { Tooltip } from '../primitives/Tooltip.js';
@@ -19,6 +19,7 @@ export function AgentSessionListRow({
   agentName,
   sourceType,
   lastActivityAt,
+  lastTurnStatus,
   metrics,
   createdBySubject,
   active,
@@ -32,6 +33,7 @@ export function AgentSessionListRow({
   const absolute = formatAbsoluteDateTime(activityAt);
   const subjectLabel = createdBySubject != null ? createdByLabel(createdBySubject) : null;
   const subjectInitials = subjectLabel != null ? getUserInitials(subjectLabel) || '?' : null;
+  const statusDotClass = lastTurnStatusDotClass(lastTurnStatus);
 
   return (
     <div
@@ -41,9 +43,16 @@ export function AgentSessionListRow({
         active ? 'bg-dropdown-selected-item-bg' : 'hover:bg-ghost-button-hover',
       )}
     >
-      <div className="flex items-center gap-2 px-4 pt-3">
-        <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-1 text-left">
+      <div className="flex items-center gap-2 pl-3 pr-4 pt-3">
+        <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
           <span className="truncate text-sm font-medium text-text-primary">{title}</span>
+          {statusDotClass != null ? (
+            <span
+              data-slot="session-status-dot"
+              aria-hidden
+              className={cn('size-1.5 shrink-0 rounded-full', statusDotClass)}
+            />
+          ) : null}
           {sourceType === 'schedule' ? (
             <Tooltip content="Scheduled Session">
               <span aria-label="Scheduled run" className="inline-flex shrink-0">
@@ -95,7 +104,7 @@ export function AgentSessionListRow({
       <button
         type="button"
         onClick={onSelect}
-        className="flex w-full items-end justify-between gap-2 px-4 pt-2 pb-3 text-left text-xs text-text-secondary"
+        className="flex w-full items-end justify-between gap-2 pt-2 pr-4 pb-3 pl-3 text-left text-xs text-text-secondary"
       >
         <span className="flex min-w-0 items-center gap-1.5">
           {subjectLabel != null && subjectInitials != null ? (

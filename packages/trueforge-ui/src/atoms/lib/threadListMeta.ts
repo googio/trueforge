@@ -1,5 +1,26 @@
+import type { TurnStatus } from '../../server/types.js';
+
 /** Matches TrueForge `PATCH /sessions/{id}` title max. */
 export const MAX_SESSION_TITLE_LENGTH = 50;
+
+function isTurnStatus(value: unknown): value is TurnStatus {
+  return value === 'running' || value === 'paused' || value === 'done' || value === 'cancelled' || value === 'error';
+}
+
+/** Tailwind bg class for a last-turn status dot; undefined means hide the dot. */
+export function lastTurnStatusDotClass(status: TurnStatus | undefined | null): string | undefined {
+  switch (status) {
+    case 'running':
+      return 'bg-indigo-500';
+    case 'paused':
+      return 'bg-amber-500';
+    case 'cancelled':
+    case 'error':
+      return 'bg-failure-bg';
+    default:
+      return undefined;
+  }
+}
 
 /** Compact relative age for sidebar session rows (e.g. 30m, 22h, 1d). */
 export function formatRelativeShort(date: Date, now: Date = new Date()): string {
@@ -55,6 +76,27 @@ export function readThreadIsMutable(custom: unknown): boolean | undefined {
   if (!('isMutable' in custom)) return undefined;
   const value = Reflect.get(custom, 'isMutable');
   return typeof value === 'boolean' ? value : undefined;
+}
+
+/** Last-turn status stamped on thread-list custom by `sessionToThreadMetadata`. */
+export function readThreadLastTurnStatus(custom: unknown): TurnStatus | undefined {
+  if (custom == null || typeof custom !== 'object') return undefined;
+  if (!('lastTurnStatus' in custom)) return undefined;
+  const value = Reflect.get(custom, 'lastTurnStatus');
+  return isTurnStatus(value) ? value : undefined;
+}
+
+/** Merge `lastTurnStatus` into thread-list custom (omits the key when cleared). */
+export function threadCustomWithLastTurnStatus(
+  custom: Record<string, unknown> | undefined,
+  status: TurnStatus | null | undefined,
+): Record<string, unknown> {
+  const base = custom == null ? {} : { ...custom };
+  Reflect.deleteProperty(base, 'lastTurnStatus');
+  if (status != null) {
+    base.lastTurnStatus = status;
+  }
+  return base;
 }
 
 /**

@@ -92,6 +92,7 @@ function toUiSession(session: TrueForgeApi.Session): HarnessUiSession {
     shared: session.shared,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
+    lastTurnDetails: session.lastTurnDetails ?? null,
     metrics: {
       totalTurns: session.metrics.totalTurns,
       totalDurationMs: session.metrics.totalDurationMs,

@@ -22,6 +22,12 @@ import { sessionTimeRangeFromCreatedAt } from '../../utils/sessionShareUrl.js';
 import { EmptyScreen } from '../EmptyScreen.js';
 import { cn } from '../lib/cn.js';
 import { sessionIsCreateAgent } from '../lib/sessionCreateAgent.js';
+import {
+  isNonTerminalTurnStatus,
+  mergeSessionListFirstPage,
+  SESSION_LIST_FIRST_PAGE_LIMIT,
+  SESSION_LIST_POLL_INTERVAL_MS,
+} from '../lib/sessionListPoll.js';
 import { Button } from '../primitives/Button.js';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../primitives/Dialog.js';
 import { Skeleton } from '../primitives/Skeleton.js';
@@ -102,7 +108,7 @@ export function AgentSessions({
   const listRequest = useMemo(
     () => ({
       order: 'desc' as const,
-      limit: 20,
+      limit: SESSION_LIST_FIRST_PAGE_LIMIT,
       ...(agentId == null || agentId.length === 0 ? {} : { agentId }),
       ...(startTimestamp == null ? {} : { startTimestamp }),
       ...(endTimestamp == null ? {} : { endTimestamp }),
@@ -150,6 +156,51 @@ export function AgentSessions({
       cancelled = true;
     };
   }, [detailOnly, listRequest, refreshKey, sessionsServer]);
+
+  const needsLastTurnStatusPoll = useMemo(
+    () => entries.some(entry => isNonTerminalTurnStatus(entry.lastTurnDetails?.state.status)),
+    [entries],
+  );
+
+  // Refresh last-turn status for the latest page only; keep any load-more pages intact.
+  useEffect(() => {
+    if (detailOnly || listLoading || listFailed || !needsLastTurnStatusPoll) return;
+
+    let cancelled = false;
+    const requestId = listRequestIdRef.current;
+
+    const poll = async () => {
+      try {
+        const page = await sessionsServer.listSessions(listRequest);
+        if (cancelled || listRequestIdRef.current !== requestId) return;
+        setEntries(current =>
+          mergeSessionListFirstPage({
+            current,
+            firstPage: page.data,
+            mergeItem: (prev, next) => {
+              const prevDetails = prev.lastTurnDetails;
+              const nextDetails = next.lastTurnDetails;
+              if (prevDetails?.id === nextDetails?.id && prevDetails?.state.status === nextDetails?.state.status) {
+                return prev;
+              }
+              return { ...prev, lastTurnDetails: nextDetails };
+            },
+          }),
+        );
+      } catch {
+        // Keep showing the last known status on transient poll failures.
+      }
+    };
+
+    const intervalId = window.setInterval(() => {
+      void poll();
+    }, SESSION_LIST_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [detailOnly, listFailed, listLoading, listRequest, needsLastTurnStatusPoll, sessionsServer]);
 
   const loadMore = useCallback(async () => {
     // A ref, not `listLoadingMore`: the observer can fire twice before a re-render.
@@ -401,6 +452,7 @@ export function AgentSessions({
                   agentName={entry.agentName ?? undefined}
                   sourceType={entrySourceType(entry)}
                   lastActivityAt={entry.lastActivityAt}
+                  {...(entry.lastTurnDetails == null ? {} : { lastTurnStatus: entry.lastTurnDetails.state.status })}
                   metrics={entry.metrics}
                   {...(entry.createdBySubject == null ? {} : { createdBySubject: entry.createdBySubject })}
                   active={entry.id === selectedSessionId}

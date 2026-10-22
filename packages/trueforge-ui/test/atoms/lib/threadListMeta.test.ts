@@ -3,8 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   canReuseMutableShell,
   formatRelativeShort,
+  lastTurnStatusDotClass,
   readThreadAgentName,
   readThreadIsMutable,
+  readThreadLastTurnStatus,
+  threadCustomWithLastTurnStatus,
   threadListIndicesByRecency,
   threadListItemIsMutable,
 } from '@/atoms/lib/threadListMeta.js';
@@ -25,6 +28,39 @@ describe('readThreadAgentName', () => {
     expect(readThreadAgentName({})).toBeUndefined();
     expect(readThreadAgentName(null)).toBeUndefined();
     expect(readThreadAgentName({ agentName: 1 })).toBeUndefined();
+  });
+});
+
+describe('readThreadLastTurnStatus', () => {
+  it('reads a valid lastTurnStatus from custom metadata', () => {
+    expect(readThreadLastTurnStatus({ lastTurnStatus: 'running' })).toBe('running');
+    expect(readThreadLastTurnStatus({ lastTurnStatus: 'paused' })).toBe('paused');
+    expect(readThreadLastTurnStatus({})).toBeUndefined();
+    expect(readThreadLastTurnStatus({ lastTurnStatus: 'nope' })).toBeUndefined();
+  });
+});
+
+describe('lastTurnStatusDotClass', () => {
+  it('maps statuses to dot colors and hides done', () => {
+    expect(lastTurnStatusDotClass('running')).toBe('bg-indigo-500');
+    expect(lastTurnStatusDotClass('paused')).toBe('bg-amber-500');
+    expect(lastTurnStatusDotClass('error')).toBe('bg-failure-bg');
+    expect(lastTurnStatusDotClass('cancelled')).toBe('bg-failure-bg');
+    expect(lastTurnStatusDotClass('done')).toBeUndefined();
+    expect(lastTurnStatusDotClass(null)).toBeUndefined();
+  });
+});
+
+describe('threadCustomWithLastTurnStatus', () => {
+  it('sets and clears lastTurnStatus without dropping other custom keys', () => {
+    expect(threadCustomWithLastTurnStatus({ isMutable: true, agentName: 'x' }, 'running')).toEqual({
+      isMutable: true,
+      agentName: 'x',
+      lastTurnStatus: 'running',
+    });
+    expect(threadCustomWithLastTurnStatus({ isMutable: true, lastTurnStatus: 'running' }, null)).toEqual({
+      isMutable: true,
+    });
   });
 });
 

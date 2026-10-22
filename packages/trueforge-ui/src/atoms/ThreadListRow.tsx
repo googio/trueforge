@@ -3,9 +3,10 @@
 import type { ReactNode } from 'react';
 
 import { Icon } from '../icons/Icon.js';
+import type { TurnStatus } from '../server/types.js';
 import { auiButtonClass } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
-import { formatRelativeShort } from './lib/threadListMeta.js';
+import { formatRelativeShort, lastTurnStatusDotClass } from './lib/threadListMeta.js';
 
 export type ThreadListRowProps = {
   title: string;
@@ -13,6 +14,8 @@ export type ThreadListRowProps = {
   onSelect: () => void;
   /** Named-agent label under the title (from session.agentName). */
   agentName?: string;
+  /** Last-turn status for the leading status dot. */
+  lastTurnStatus?: TurnStatus;
   /** Shown as compact relative time on the right. */
   lastMessageAt?: Date;
   /** Overflow actions (e.g. rename / delete menu) — rendered as a sibling of the title button. */
@@ -34,12 +37,14 @@ export function ThreadListRow({
   active,
   onSelect,
   agentName,
+  lastTurnStatus,
   lastMessageAt,
   actions,
   className,
 }: ThreadListRowProps) {
   const relative = lastMessageAt != null ? formatRelativeShort(lastMessageAt) : undefined;
   const hasTrailing = relative != null || actions != null;
+  const statusDotClass = lastTurnStatusDotClass(lastTurnStatus);
 
   return (
     <div
@@ -60,14 +65,23 @@ export function ThreadListRow({
         className={auiButtonClass({
           variant: 'ghost',
           className: cn(
-            '!justify-start h-auto min-h-8 min-w-0 flex-1 overflow-hidden rounded-[0.75rem] px-2.5 py-1.5 text-left font-normal shadow-none',
+            '!justify-start h-auto min-h-8 min-w-0 flex-1 overflow-hidden rounded-[0.75rem] py-1.5 pl-1.5 pr-2.5 text-left font-normal shadow-none',
             'bg-transparent hover:bg-transparent hover:text-inherit',
             active ? 'text-dropdown-selected-item-text' : 'text-inherit',
           ),
         })}
       >
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-normal text-text-primary">{title}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            {statusDotClass != null ? (
+              <span
+                data-slot="session-status-dot"
+                aria-hidden
+                className={cn('size-1.5 shrink-0 rounded-full', statusDotClass)}
+              />
+            ) : null}
+            <span className="truncate text-sm font-normal text-text-primary">{title}</span>
+          </span>
           {agentName != null ? <ThreadListAgentName agentName={agentName} /> : null}
         </span>
       </button>

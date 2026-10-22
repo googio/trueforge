@@ -18,9 +18,17 @@ import { auiButtonClass } from '../atoms/lib/buttonClasses.js';
 import { cn } from '../atoms/lib/cn.js';
 import { useCompactLayout } from '../atoms/lib/CompactLayoutContext.js';
 import {
+  isNonTerminalTurnStatus,
+  SESSION_LIST_FIRST_PAGE_LIMIT,
+  SESSION_LIST_POLL_INTERVAL_MS,
+  sessionListPollStartTimestamp,
+} from '../atoms/lib/sessionListPoll.js';
+import {
   canReuseMutableShell,
   readThreadAgentName,
   readThreadIsMutable,
+  readThreadLastTurnStatus,
+  threadCustomWithLastTurnStatus,
   threadListIndicesByRecency,
   threadListItemIsMutable,
 } from '../atoms/lib/threadListMeta.js';
@@ -204,6 +212,7 @@ function ThreadListItemRow({
   const custom = useAuiState(s => s.threadListItem.custom);
   const mainThreadId = useAuiState(s => s.threads.mainThreadId);
   const agentName = readThreadAgentName(custom);
+  const lastTurnStatus = readThreadLastTurnStatus(custom);
   const showRename = canRenameSession && remoteId != null;
   const showDelete = canDeleteSession && remoteId != null;
   const showActions = showRename || showDelete;
@@ -276,6 +285,7 @@ function ThreadListItemRow({
         title={displayTitle}
         active={id === mainThreadId && !sidebarNavOpen}
         agentName={agentName}
+        {...(lastTurnStatus == null ? {} : { lastTurnStatus })}
         lastMessageAt={lastMessageAt}
         onSelect={() => {
           track(
@@ -489,6 +499,61 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
     [threadItems],
   );
   const { allows } = useResourcePermissions({ resourceType: 'session', resourceIds: remoteSessionIds });
+
+  const needsLastTurnStatusPoll = useMemo(
+    () => threadItems.some(item => isNonTerminalTurnStatus(readThreadLastTurnStatus(item.custom))),
+    [threadItems],
+  );
+
+  // Refresh last-turn status for the latest page only (default limit); do not walk page tokens.
+  useEffect(() => {
+    if (isIdle || isLoading || server == null || !needsLastTurnStatusPoll) return;
+
+    const listSessionsAgentId = shell?.listSessionsAgentId;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const page = await server.listSessions({
+          createdByMe: true,
+          limit: SESSION_LIST_FIRST_PAGE_LIMIT,
+          startTimestamp: sessionListPollStartTimestamp(),
+          ...(listSessionsAgentId == null || listSessionsAgentId.length === 0 ? {} : { agentId: listSessionsAgentId }),
+        });
+        if (cancelled) return;
+
+        const statusByRemoteId = new Map(
+          page.data.map(session => [session.id, session.lastTurnDetails?.state.status] as const),
+        );
+        const items = auiRef.current.threads().getState().threadItems;
+        for (const item of items) {
+          if (item.remoteId == null || !statusByRemoteId.has(item.remoteId)) continue;
+          const nextStatus = statusByRemoteId.get(item.remoteId);
+          const prevStatus = readThreadLastTurnStatus(item.custom);
+          if (nextStatus === prevStatus) continue;
+          const custom =
+            item.custom != null && typeof item.custom === 'object' && !Array.isArray(item.custom)
+              ? Object.fromEntries(Object.entries(item.custom))
+              : undefined;
+          void auiRef.current
+            .threads()
+            .item({ id: item.id })
+            .updateCustom(threadCustomWithLastTurnStatus(custom, nextStatus ?? null));
+        }
+      } catch {
+        // Keep showing the last known status on transient poll failures.
+      }
+    };
+
+    const intervalId = window.setInterval(() => {
+      void poll();
+    }, SESSION_LIST_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [isIdle, isLoading, needsLastTurnStatusPoll, server, shell?.listSessionsAgentId]);
 
   // Fill an underflowing viewport; once it scrolls, paginate only near the bottom.
   // Re-measure after commit (threadIds / hasMore) instead of rAF-chaining, which
