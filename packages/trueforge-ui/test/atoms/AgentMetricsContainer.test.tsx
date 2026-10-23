@@ -54,6 +54,22 @@ function renderMetrics(metrics: AgentMetricsServer) {
   );
 }
 
+function renderTwoMetricsViews(metrics: AgentMetricsServer) {
+  render(
+    <SlotsProvider
+      overrides={{
+        AgentMetricsTimeRangeFilter: () => <span />,
+        AgentMetricChart: ({ definition }) => <div>{definition.displayName}</div>,
+      }}
+    >
+      <ServerProvider server={createMockAgentUIServer({ metrics })}>
+        <AgentMetricsContainer agentId="agent-1" />
+        <AgentMetricsContainer agentId="agent-1" />
+      </ServerProvider>
+    </SlotsProvider>,
+  );
+}
+
 describe('AgentMetricsContainer', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -152,5 +168,20 @@ describe('AgentMetricsContainer', () => {
 
     expect(await screen.findByText('No aggregate metrics')).toBeInTheDocument();
     expect(screen.getByText('No charts available')).toBeInTheDocument();
+  });
+
+  it('shares metric requests between views of the same agent and range', async () => {
+    const getCharts = vi.fn(async () => definitions);
+    const getMeters = vi.fn(async (_request: AgentMetricRangeRequest) => []);
+    const getChartData = vi.fn(async (_request: AgentMetricChartDataRequest): Promise<AgentMetricChartData> => ({
+      step: '3600',
+      graphs: [],
+    }));
+    renderTwoMetricsViews({ getCharts, getMeters, getChartData });
+
+    await waitFor(() => expect(screen.getAllByText('Sessions')).toHaveLength(2));
+    expect(getCharts).toHaveBeenCalledTimes(1);
+    expect(getMeters).toHaveBeenCalledTimes(1);
+    expect(getChartData).toHaveBeenCalledTimes(1);
   });
 });

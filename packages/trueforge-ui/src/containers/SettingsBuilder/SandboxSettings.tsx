@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
 
 import { useTrackAnalytics } from '@/analytics/AnalyticsProvider.js';
 import { AnalyticsEvents } from '@/analytics/events.js';
@@ -10,6 +11,8 @@ import {
   isDaytonaSandboxConfig,
   type DaytonaSandboxConfig,
 } from '../../plugins/trueforge-agent-server-adapter/catalogs/sandboxProviderCatalog.js';
+import { CATALOG_STALE_TIME_MS, useServerQueryClient } from '../../server/queryClient.js';
+import { queryKeys } from '../../server/queryKeys.js';
 import { useCatalogServer } from '../../server/ServerContext.js';
 import type { SandboxProviderBase, SandboxProviderCatalogEntry } from '../../server/types.js';
 import { getErrorMessage } from '../../utils/getErrorMessage.js';
@@ -29,15 +32,15 @@ const configFrom = ({
   autoDeleteIntervalInMinutes,
 });
 
+const EMPTY_LIST: SandboxProviderBase[] = [];
+const EMPTY_CATALOG: SandboxProviderCatalogEntry[] = [];
+
 const SandboxSettings = () => {
   const { sandboxCatalog } = useCatalogServer();
   const toaster = useToasterOptional();
   const track = useTrackAnalytics();
 
-  const [providers, setProviders] = useState<SandboxProviderBase[]>([]);
-  const [catalog, setCatalog] = useState<SandboxProviderCatalogEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -46,30 +49,37 @@ const SandboxSettings = () => {
   const [pendingRemoval, setPendingRemoval] = useState<SandboxProviderBase | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
 
-  const refresh = useCallback(
-    async ({ quiet = false }: { quiet?: boolean } = {}) => {
-      if (!sandboxCatalog) return;
-      if (!quiet) setLoading(true);
-      setError(null);
-      try {
-        const [listed, available] = await Promise.all([
-          sandboxCatalog.listSandboxProviders(),
-          sandboxCatalog.getSandboxProviderCatalog(),
-        ]);
-        setProviders(listed);
-        setCatalog(available);
-      } catch (err) {
-        setError(getErrorMessage(err, 'Failed to load sandbox providers'));
-      } finally {
-        if (!quiet) setLoading(false);
-      }
+  const queryClient = useServerQueryClient();
+  const listQuery = useQuery(
+    {
+      queryKey: queryKeys.settings.sandboxProviders(),
+      queryFn: () =>
+        sandboxCatalog == null
+          ? Promise.reject(new Error('Catalog is not available.'))
+          : sandboxCatalog.listSandboxProviders(),
+      enabled: sandboxCatalog != null,
+      staleTime: CATALOG_STALE_TIME_MS,
     },
-    [sandboxCatalog],
+    queryClient,
   );
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const catalogQuery = useQuery(
+    {
+      queryKey: queryKeys.settings.sandboxProviderCatalog(),
+      queryFn: () =>
+        sandboxCatalog == null
+          ? Promise.reject(new Error('Catalog is not available.'))
+          : sandboxCatalog.getSandboxProviderCatalog(),
+      enabled: sandboxCatalog != null,
+      staleTime: CATALOG_STALE_TIME_MS,
+    },
+    queryClient,
+  );
+  const providers = listQuery.data ?? EMPTY_LIST;
+  const catalog = catalogQuery.data ?? EMPTY_CATALOG;
+  const loading = listQuery.isPending || catalogQuery.isPending;
+  const loadError = listQuery.error ?? catalogQuery.error;
+  const error =
+    actionError ?? (loadError == null ? null : getErrorMessage(loadError, 'Failed to load sandbox providers'));
 
   // Tenant/UI-wide: only one sandbox provider may be configured at a time.
   const hasConfiguredProvider = providers.length > 0;
@@ -89,12 +99,12 @@ const SandboxSettings = () => {
     return <p className="text-sm text-text-secondary">Sandbox provider catalog is not available.</p>;
   }
 
-  const runMutation = async (fn: () => Promise<void>, setMutationError = setError) => {
+  const runMutation = async (fn: () => Promise<void>, setMutationError = setActionError) => {
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       await fn();
-      await refresh({ quiet: true });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.settings.sandboxProviders() });
     } catch (err) {
       setMutationError(getErrorMessage(err, 'Request failed'));
       throw err;

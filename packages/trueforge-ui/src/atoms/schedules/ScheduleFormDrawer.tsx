@@ -7,6 +7,8 @@ import { AnalyticsEvents } from '../../analytics/events.js';
 import { useToasterOptional } from '../../containers/ToasterContainer.js';
 import { useResourcePermissions } from '../../hooks/useResourcePermissions.js';
 import { Icon } from '../../icons/Icon.js';
+import { useServerQueryClient } from '../../server/queryClient.js';
+import { queryKeys } from '../../server/queryKeys.js';
 import { useScheduleServer, useServer } from '../../server/ServerContext.js';
 import { libraryAgentId, useOptionalShellMode } from '../../server/ShellModeContext.js';
 import type { AgentLibraryEntry, Schedule } from '../../server/types.js';
@@ -57,6 +59,8 @@ function ScheduleFormDrawerBody({
   const [saving, setSaving] = useState(false);
   const [activating, setActivating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const queryClient = useServerQueryClient();
+  const invalidateSchedules = () => queryClient.invalidateQueries({ queryKey: queryKeys.schedules.all() });
   const agentIdRef = useRef(agentId);
   agentIdRef.current = agentId;
 
@@ -170,6 +174,7 @@ function ScheduleFormDrawerBody({
           status: schedule.status,
         });
         track(AnalyticsEvents.Schedule.EDITED, { schedule_id: schedule.id, agent_id: schedule.agentId });
+        void invalidateSchedules();
         onSaved?.();
         onOpenChange(false);
         return;
@@ -185,6 +190,7 @@ function ScheduleFormDrawerBody({
           status: 'paused',
         });
         track(AnalyticsEvents.Schedule.EDITED, { schedule_id: saved.id, agent_id: saved.agentId });
+        void invalidateSchedules();
         onSaved?.();
         enterTestView(saved);
         toaster?.showSuccess({
@@ -203,6 +209,7 @@ function ScheduleFormDrawerBody({
         status: 'paused',
       });
       track(AnalyticsEvents.Schedule.CREATED, { schedule_id: saved.id, agent_id: agentId });
+      void invalidateSchedules();
       onSaved?.();
       enterTestView(saved);
       toaster?.showSuccess({
@@ -230,6 +237,7 @@ function ScheduleFormDrawerBody({
         timezone: view.schedule.timezone,
         status: 'active',
       });
+      void invalidateSchedules();
       onSaved?.();
       toaster?.showSuccess({ title: 'Schedule activated' });
       onOpenChange(false);

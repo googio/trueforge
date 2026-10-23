@@ -18,6 +18,7 @@ import {
   validateEnvironmentForm,
   type EnvironmentFormValues,
 } from './EnvironmentFormFields.js';
+import { useInvalidateEnvironments } from './useInvalidateEnvironments.js';
 
 export type EnvironmentFormDrawerProps = {
   open: boolean;
@@ -31,6 +32,7 @@ export function EnvironmentFormDrawer({ open, onOpenChange, mode, environment, o
   const environmentServer = useSandboxEnvironmentServer();
   const toaster = useToasterOptional();
   const track = useTrackAnalytics();
+  const invalidateEnvironments = useInvalidateEnvironments();
   const [form, setForm] = useState<EnvironmentFormValues>(() => manifestToFormValues(defaultEnvironmentManifest()));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,6 +68,7 @@ export function EnvironmentFormDrawer({ open, onOpenChange, mode, environment, o
         environment_name: saved.name,
         environment_id: saved.id,
       });
+      invalidateEnvironments();
       toaster?.showSuccess({
         title: mode === 'create' ? 'Environment created' : 'Environment updated',
       });

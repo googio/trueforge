@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useCallback, useMemo, useState } from 'react';
 
 import { useTrackAnalytics } from '@/analytics/AnalyticsProvider.js';
 import { AnalyticsEvents } from '@/analytics/events.js';
@@ -16,6 +17,8 @@ import CustomModelProviderForm, {
 } from '@/containers/SettingsBuilder/CustomModelProviderForm.js';
 import { useToasterOptional } from '@/containers/ToasterContainer.js';
 import { Icon } from '@/icons/Icon.js';
+import { CATALOG_STALE_TIME_MS, useServerQueryClient } from '@/server/queryClient.js';
+import { queryKeys } from '@/server/queryKeys.js';
 import { useCatalogServer } from '@/server/ServerContext.js';
 import type { ModelEntry, ModelProviderBase, ModelProviderCatalogEntry } from '@/server/types.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
@@ -46,16 +49,17 @@ function catalogBaseUrl(provider: ModelProviderCatalogEntry): string {
   return '';
 }
 
+const EMPTY_CONFIGURED: ModelProviderBase[] = [];
+const EMPTY_CATALOG: ModelProviderCatalogEntry[] = [];
+
 const ModelSettings = () => {
   const { modelCatalog } = useCatalogServer();
+  const queryClient = useServerQueryClient();
   const toaster = useToasterOptional();
   const track = useTrackAnalytics();
 
   const [query, setQuery] = useState('');
-  const [configured, setConfigured] = useState<ModelProviderBase[]>([]);
-  const [catalog, setCatalog] = useState<ModelProviderCatalogEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -67,38 +71,44 @@ const ModelSettings = () => {
   const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
 
+  const configuredQuery = useQuery(
+    {
+      queryKey: queryKeys.settings.modelProviders(),
+      queryFn: () => modelCatalog.listModelProviders(),
+      staleTime: CATALOG_STALE_TIME_MS,
+    },
+    queryClient,
+  );
+  const catalogQuery = useQuery(
+    {
+      queryKey: queryKeys.settings.modelProviderCatalog(),
+      queryFn: () => modelCatalog.getModelProviderCatalog(),
+      staleTime: CATALOG_STALE_TIME_MS,
+    },
+    queryClient,
+  );
+  const configured = configuredQuery.data ?? EMPTY_CONFIGURED;
+  const catalog = catalogQuery.data ?? EMPTY_CATALOG;
+  const loading = configuredQuery.isPending || catalogQuery.isPending;
+  const loadError = configuredQuery.error ?? catalogQuery.error;
+  const error = loadError == null ? mutationError : getErrorMessage(loadError, 'Failed to load model providers');
+
   const modelProviderIconMap = useMemo(() => {
-    return (catalog ?? []).reduce(
-      (acc, entry) => {
-        acc[entry.name] = entry.logo ?? '';
-        return acc;
-      },
-      {} as Record<string, string>,
-    );
+    return catalog.reduce<Record<string, string>>((acc, entry) => {
+      acc[entry.name] = entry.logo ?? '';
+      return acc;
+    }, {});
   }, [catalog]);
 
   const normalizedQuery = query.trim().toLowerCase();
 
   const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [listed, available] = await Promise.all([
-        modelCatalog.listModelProviders(),
-        modelCatalog.getModelProviderCatalog(),
-      ]);
-      setConfigured(listed);
-      setCatalog(available);
-    } catch (err) {
-      setError(getErrorMessage(err, 'Failed to load model providers'));
-    } finally {
-      setLoading(false);
-    }
-  }, [modelCatalog]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings.modelProviders() }),
+      // Pickers read models from the configured providers.
+      queryClient.invalidateQueries({ queryKey: queryKeys.catalog.models() }),
+    ]);
+  }, [queryClient]);
 
   const configuredTypes = useMemo(() => new Set(configured.map(provider => provider.type)), [configured]);
 
@@ -150,7 +160,7 @@ const ModelSettings = () => {
 
   const runMutation = async (fn: () => Promise<void>, onError?: (error: unknown) => void) => {
     setBusy(true);
-    setError(null);
+    setMutationError(null);
     try {
       await fn();
       await refresh();
@@ -159,7 +169,7 @@ const ModelSettings = () => {
       if (onError) {
         onError(err);
       } else if (toaster == null) {
-        setError(getErrorMessage(err, 'Request failed'));
+        setMutationError(getErrorMessage(err, 'Request failed'));
       } else {
         toaster.showError(err);
       }

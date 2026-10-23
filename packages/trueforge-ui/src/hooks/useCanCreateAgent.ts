@@ -1,7 +1,10 @@
 'use client';
 
-import { createContext, createElement, useContext, useEffect, useState, type ReactNode } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { createContext, createElement, useContext, useMemo, type ReactNode } from 'react';
 
+import { useServerQueryClient } from '../server/queryClient.js';
+import { queryKeys } from '../server/queryKeys.js';
 import type { PermissionsServer } from '../server/types.js';
 
 export type UseCanCreateAgentResult = {
@@ -28,37 +31,27 @@ export function CanCreateAgentProvider({
   permissionsServer: PermissionsServer | null;
   children: ReactNode;
 }) {
-  const [state, setState] = useState<UseCanCreateAgentResult>({
-    loading: permissionsServer != null,
-    canCreateAgent: permissionsServer == null,
-  });
+  const queryClient = useServerQueryClient();
+  const tenantQuery = useQuery(
+    {
+      queryKey: queryKeys.permissions.tenant(),
+      queryFn: () =>
+        permissionsServer == null
+          ? Promise.reject(new Error('Permissions server is not configured.'))
+          : permissionsServer.listPermissions({ resourceType: 'tenant', resourceIds: [] }),
+      enabled: permissionsServer != null,
+    },
+    queryClient,
+  );
 
-  useEffect(() => {
-    if (permissionsServer == null) {
-      setState({ loading: false, canCreateAgent: true });
-      return;
-    }
+  const value = useMemo<UseCanCreateAgentResult>(() => {
+    if (permissionsServer == null) return { loading: false, canCreateAgent: true };
+    if (tenantQuery.data == null) return { loading: tenantQuery.isPending, canCreateAgent: false };
+    const granted = tenantQuery.data.data.permissions.agent ?? [];
+    return { loading: false, canCreateAgent: granted.includes('CREATE') };
+  }, [permissionsServer, tenantQuery.data, tenantQuery.isPending]);
 
-    let cancelled = false;
-    setState({ loading: true, canCreateAgent: false });
-    void permissionsServer
-      .listPermissions({ resourceType: 'tenant', resourceIds: [] })
-      .then(response => {
-        if (cancelled) return;
-        const granted = response.data.permissions.agent ?? [];
-        setState({ loading: false, canCreateAgent: granted.includes('CREATE') });
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setState({ loading: false, canCreateAgent: false });
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [permissionsServer]);
-
-  return createElement(CanCreateAgentContext.Provider, { value: state }, children);
+  return createElement(CanCreateAgentContext.Provider, { value }, children);
 }
 
 /**

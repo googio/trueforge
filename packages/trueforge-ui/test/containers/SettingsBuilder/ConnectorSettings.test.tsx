@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { QueryClient } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -6,6 +7,8 @@ import { AnalyticsProvider } from '@/analytics/AnalyticsProvider.js';
 import { AnalyticsEvents } from '@/analytics/events.js';
 import ConnectorSettings from '@/containers/SettingsBuilder/ConnectorSettings.js';
 import { ServerProvider } from '@/server/ServerContext.js';
+import { useServerQueryClient } from '@/server/queryClient.js';
+import { queryKeys } from '@/server/queryKeys.js';
 import type { ConnectorBase, ConnectorCatalogEntry } from '@/server/types.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
 
@@ -258,5 +261,51 @@ describe('ConnectorSettings edit flow', () => {
       connector_name: connector.name,
     });
     expect(track).not.toHaveBeenCalledWith(AnalyticsEvents.Settings.CONNECTOR_DELETED, expect.anything());
+  });
+});
+
+describe('ConnectorSettings caching', () => {
+  it('refetches connectors and invalidates picker connectors after an edit', async () => {
+    const connector: ConnectorBase = {
+      id: 'custom-mcp',
+      name: 'Custom MCP',
+      description: 'Custom tools',
+      url: 'https://mcp.example.com/mcp',
+      authenticated: true,
+      requiresAuth: false,
+      auth: { type: 'none' },
+    };
+    const listConnectors = vi.fn(async () => [connector]);
+    const connectorCatalog = {
+      getConnectorCatalog: async () => [],
+      listConnectors,
+      getConnector: async () => connector,
+      getToolsByConnectorId: async () => [],
+      createConnector: async () => connector,
+      updateConnector: async () => connector,
+      authenticateConnector: async () => ({ authorization_endpoint: '' }),
+      disconnectConnector: async () => connector,
+    };
+    const server = createMockAgentUIServer({ catalog: createMockCatalog({ connectorCatalog }) });
+    let queryClient: QueryClient | undefined;
+    function CaptureClient() {
+      queryClient = useServerQueryClient();
+      return null;
+    }
+
+    render(
+      <ServerProvider server={server}>
+        <CaptureClient />
+        <ConnectorSettings />
+      </ServerProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    if (queryClient === undefined) throw new Error('Expected query client');
+    queryClient.setQueryData(queryKeys.catalog.mcp(), []);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(listConnectors).toHaveBeenCalledTimes(2));
+    expect(queryClient.getQueryState(queryKeys.catalog.mcp())?.isInvalidated).toBe(true);
   });
 });

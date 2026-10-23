@@ -401,7 +401,7 @@ describe('SessionsPage', () => {
     renderPage();
 
     expect(await screen.findByRole('button', { name: 'Load recent sessions' })).toBeInTheDocument();
-    const row = screen.getByText('Draft session');
+    const row = await screen.findByText('Draft session');
     fireEvent.click(row.closest('button') ?? row);
 
     expect(screen.getByRole('button', { name: 'Load recent sessions' })).toBeInTheDocument();
@@ -428,7 +428,7 @@ describe('SessionsPage', () => {
     await waitFor(() => {
       expect(deleteSession).toHaveBeenCalledWith({ sessionId: 'sess-1' });
     });
-    expect(screen.queryByText('Named session')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('Named session')).not.toBeInTheDocument());
     expect(screen.getByText('Draft session')).toBeInTheDocument();
   });
 

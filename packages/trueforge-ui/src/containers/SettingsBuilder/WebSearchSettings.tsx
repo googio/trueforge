@@ -1,56 +1,66 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
 
 import { useTrackAnalytics } from '@/analytics/AnalyticsProvider.js';
 import { AnalyticsEvents } from '@/analytics/events.js';
 import { Button } from '../../atoms/primitives/Button.js';
 import { Icon } from '../../icons/Icon.js';
+import { CATALOG_STALE_TIME_MS, useServerQueryClient } from '../../server/queryClient.js';
+import { queryKeys } from '../../server/queryKeys.js';
 import { useCatalogServer } from '../../server/ServerContext.js';
 import type { WebSearchProviderBase, WebSearchProviderCatalogEntry } from '../../server/types.js';
 import { getErrorMessage } from '../../utils/getErrorMessage.js';
 import { useToasterOptional } from '../ToasterContainer.js';
 import ConfigureWebSearchForm, { type WebSearchConfigDraft } from './ConfigureWebSearchForm.js';
 
+const EMPTY_LIST: WebSearchProviderBase[] = [];
+const EMPTY_CATALOG: WebSearchProviderCatalogEntry[] = [];
+
 const WebSearchSettings = () => {
   const { webSearchCatalog } = useCatalogServer();
   const toaster = useToasterOptional();
   const track = useTrackAnalytics();
 
-  const [providers, setProviders] = useState<WebSearchProviderBase[]>([]);
-  const [catalog, setCatalog] = useState<WebSearchProviderCatalogEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const [createEntry, setCreateEntry] = useState<WebSearchProviderCatalogEntry | null>(null);
   const [updateProvider, setUpdateProvider] = useState<WebSearchProviderBase | null>(null);
 
-  const refresh = useCallback(
-    async ({ quiet = false }: { quiet?: boolean } = {}) => {
-      if (!webSearchCatalog) return;
-      if (!quiet) setLoading(true);
-      setError(null);
-      try {
-        const [listed, available] = await Promise.all([
-          webSearchCatalog.listWebSearchProviders(),
-          webSearchCatalog.getWebSearchProviderCatalog(),
-        ]);
-        setProviders(listed);
-        setCatalog(available);
-      } catch (err) {
-        setError(getErrorMessage(err, 'Failed to load web search providers'));
-      } finally {
-        if (!quiet) setLoading(false);
-      }
+  const queryClient = useServerQueryClient();
+  const listQuery = useQuery(
+    {
+      queryKey: queryKeys.settings.webSearchProviders(),
+      queryFn: () =>
+        webSearchCatalog == null
+          ? Promise.reject(new Error('Catalog is not available.'))
+          : webSearchCatalog.listWebSearchProviders(),
+      enabled: webSearchCatalog != null,
+      staleTime: CATALOG_STALE_TIME_MS,
     },
-    [webSearchCatalog],
+    queryClient,
   );
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const catalogQuery = useQuery(
+    {
+      queryKey: queryKeys.settings.webSearchProviderCatalog(),
+      queryFn: () =>
+        webSearchCatalog == null
+          ? Promise.reject(new Error('Catalog is not available.'))
+          : webSearchCatalog.getWebSearchProviderCatalog(),
+      enabled: webSearchCatalog != null,
+      staleTime: CATALOG_STALE_TIME_MS,
+    },
+    queryClient,
+  );
+  const providers = listQuery.data ?? EMPTY_LIST;
+  const catalog = catalogQuery.data ?? EMPTY_CATALOG;
+  const loading = listQuery.isPending || catalogQuery.isPending;
+  const loadError = listQuery.error ?? catalogQuery.error;
+  const error =
+    actionError ?? (loadError == null ? null : getErrorMessage(loadError, 'Failed to load web search providers'));
 
   // Tenant/UI-wide: only one web-search provider may be configured at a time.
   const hasConfiguredProvider = providers.length > 0;
@@ -64,12 +74,12 @@ const WebSearchSettings = () => {
     return <p className="text-sm text-text-secondary">Web search provider catalog is not available.</p>;
   }
 
-  const runMutation = async (fn: () => Promise<void>, setMutationError = setError) => {
+  const runMutation = async (fn: () => Promise<void>, setMutationError = setActionError) => {
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       await fn();
-      await refresh({ quiet: true });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.settings.webSearchProviders() });
     } catch (err) {
       setMutationError(getErrorMessage(err, 'Request failed'));
       throw err;

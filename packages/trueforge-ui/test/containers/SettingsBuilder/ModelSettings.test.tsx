@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
+import type { QueryClient } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { CustomProviderDraft } from '@/containers/SettingsBuilder/CustomModelProviderForm.js';
 import ModelSettings from '@/containers/SettingsBuilder/ModelSettings.js';
 import { ServerProvider } from '@/server/ServerContext.js';
+import { useServerQueryClient } from '@/server/queryClient.js';
+import { queryKeys } from '@/server/queryKeys.js';
 import type { ModelProviderBase, UpdateModelProviderRequest } from '@/server/types.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
 
@@ -153,5 +156,43 @@ describe('ModelSettings removal', () => {
 
     await screen.findByText('gpt-4-1');
     expect(screen.queryByRole('button', { name: 'Remove gpt-4-1' })).toBeNull();
+  });
+});
+
+describe('ModelSettings caching', () => {
+  it('refetches providers and invalidates picker models after a provider is removed', async () => {
+    const listModelProviders = vi.fn(async () => [builtInProvider]);
+    const deleteModelProvider = vi.fn(async () => {});
+    const server = createMockAgentUIServer({
+      catalog: createMockCatalog({
+        modelCatalog: {
+          getModelProviderCatalog: async () => [],
+          listModelProviders,
+          createModelProvider: vi.fn(),
+          updateModelProvider: vi.fn(),
+          deleteModelProvider,
+        },
+      }),
+    });
+    let queryClient: QueryClient | undefined;
+    function CaptureClient() {
+      queryClient = useServerQueryClient();
+      return null;
+    }
+
+    render(
+      <ServerProvider server={server}>
+        <CaptureClient />
+        <ModelSettings />
+      </ServerProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove gpt-4-1' }));
+    if (queryClient === undefined) throw new Error('Expected query client');
+    queryClient.setQueryData(queryKeys.catalog.models(), []);
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() => expect(listModelProviders).toHaveBeenCalledTimes(2));
+    expect(queryClient.getQueryState(queryKeys.catalog.models())?.isInvalidated).toBe(true);
   });
 });

@@ -1,5 +1,6 @@
 'use client';
 
+import { useQueries, useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 
 import { useTrackAnalytics } from '../../analytics/AnalyticsProvider.js';
@@ -7,9 +8,11 @@ import { AnalyticsEvents } from '../../analytics/events.js';
 import { useToasterOptional } from '../../containers/ToasterContainer.js';
 import { useResourcePermissions } from '../../hooks/useResourcePermissions.js';
 import { Icon } from '../../icons/Icon.js';
+import { useServerQueryClient } from '../../server/queryClient.js';
+import { queryKeys } from '../../server/queryKeys.js';
 import { useScheduleServer, useServer } from '../../server/ServerContext.js';
 import { libraryAgentId } from '../../server/ShellModeContext.js';
-import type { Schedule, ScheduleRun, ScheduleStatus } from '../../server/types.js';
+import type { ListSchedulesParams, Schedule, ScheduleRun, ScheduleStatus } from '../../server/types.js';
 import { useSlot } from '../../theme/SlotsProvider.js';
 import { hasCreatedBySubject } from '../../utils/createdBySubject.js';
 import { getErrorMessage } from '../../utils/getErrorMessage.js';
@@ -154,24 +157,15 @@ function ScheduleRowActions({
   );
 }
 
+const EMPTY_SCHEDULES: Schedule[] = [];
+
 export function SchedulesPage({ agentId }: SchedulesPageProps) {
   const scheduleServer = useScheduleServer();
   const server = useServer();
   const toaster = useToasterOptional();
   const track = useTrackAnalytics();
 
-  const [schedules, setSchedules] = useState<Schedule[]>([]);
-  const { allows } = useResourcePermissions({
-    resourceType: 'schedule',
-    resourceIds: schedules.map(schedule => schedule.id),
-  });
-  const [runsByScheduleId, setRunsByScheduleId] = useState<Record<string, ScheduleRun[]>>({});
-  const [runsLoading, setRunsLoading] = useState(false);
-  const [runningScheduleIds, setRunningScheduleIds] = useState<ReadonlySet<string>>(() => new Set());
-  /** Names learned from picker picks; no mount-time catalog drain. */
-  const [agentLabelById, setAgentLabelById] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useServerQueryClient();
   const [nameQuery, setNameQuery] = useState(() => filtersFromSearch(window.location.search).nameQuery);
   const [statusFilter, setStatusFilter] = useState<'all' | ScheduleStatus>(
     () => filtersFromSearch(window.location.search).statusFilter,
@@ -179,6 +173,51 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
   const [agentFilter, setAgentFilter] = useState(
     () => agentId ?? filtersFromSearch(window.location.search).agentFilter,
   );
+  const [pageSize, setPageSize] = useState(() => clampPageSize(DEFAULT_TABLE_PAGE_SIZE));
+  const [pageToken, setPageToken] = useState<string | undefined>(undefined);
+
+  const listParams: ListSchedulesParams = {
+    limit: clampPageSize(pageSize),
+    ...(pageToken === undefined || pageToken === '' ? {} : { pageToken }),
+    ...(agentFilter === 'all' ? {} : { agentIds: [agentFilter] }),
+  };
+  const schedulesQuery = useQuery(
+    {
+      queryKey: queryKeys.schedules.list(listParams),
+      queryFn: () => scheduleServer.listSchedules(listParams),
+    },
+    queryClient,
+  );
+  const schedules = schedulesQuery.data?.data ?? EMPTY_SCHEDULES;
+  const nextPageToken = schedulesQuery.data?.nextPageToken;
+  const previousPageToken = schedulesQuery.data?.previousPageToken;
+  const loading = schedulesQuery.isPending;
+  const error =
+    schedulesQuery.error == null ? null : getErrorMessage(schedulesQuery.error, 'Check your connection and try again.');
+
+  const runsQueries = useQueries(
+    {
+      queries: schedules.map(schedule => ({
+        queryKey: queryKeys.schedules.runs(schedule.id),
+        // One failing schedule shows no runs instead of failing the column.
+        queryFn: () => scheduleServer.listScheduleRuns({ scheduleId: schedule.id }).catch((): ScheduleRun[] => []),
+      })),
+    },
+    queryClient,
+  );
+  const runsLoading = runsQueries.some(query => query.isPending);
+  const runsByScheduleId: Record<string, ScheduleRun[]> = {};
+  schedules.forEach((schedule, index) => {
+    runsByScheduleId[schedule.id] = runsQueries[index]?.data ?? [];
+  });
+
+  const { allows } = useResourcePermissions({
+    resourceType: 'schedule',
+    resourceIds: schedules.map(schedule => schedule.id),
+  });
+  const [runningScheduleIds, setRunningScheduleIds] = useState<ReadonlySet<string>>(() => new Set());
+  /** Names learned from picker picks; no mount-time catalog drain. */
+  const [agentLabelById, setAgentLabelById] = useState<Record<string, string>>({});
   // Specific agent (filter or embedded): gate Create on USE. Filter "all": enable and let the drawer enforce USE.
   const permissionAgentId = agentId ?? (agentFilter === 'all' ? null : agentFilter);
   const { allows: allowsAgent } = useResourcePermissions({
@@ -189,80 +228,11 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
     server.permissions == null || permissionAgentId == null || allowsAgent(permissionAgentId, 'USE');
   const [drawer, setDrawer] = useState<DrawerState>(() => initialDrawerState(agentId));
   const [pendingDelete, setPendingDelete] = useState<Schedule | null>(null);
-  const [pageSize, setPageSize] = useState(() => clampPageSize(DEFAULT_TABLE_PAGE_SIZE));
-  const [pageToken, setPageToken] = useState<string | undefined>(undefined);
-  const [nextPageToken, setNextPageToken] = useState<string | undefined>(undefined);
-  const [previousPageToken, setPreviousPageToken] = useState<string | undefined>(undefined);
-  const loadGenRef = useRef(0);
   const didConsumeIsNewRef = useRef(false);
 
-  const loadRunsForSchedules = useCallback(
-    async ({ rows, gen }: { rows: Schedule[]; gen: number }) => {
-      if (rows.length === 0) {
-        if (gen === loadGenRef.current) setRunsByScheduleId({});
-        return;
-      }
-      setRunsLoading(true);
-      try {
-        const results = await Promise.allSettled(
-          rows.map(schedule => scheduleServer.listScheduleRuns({ scheduleId: schedule.id })),
-        );
-        if (gen !== loadGenRef.current) return;
-        setRunsByScheduleId(
-          Object.fromEntries(
-            rows.map((schedule, index) => {
-              const result = results[index];
-              const runs = result?.status === 'fulfilled' ? result.value : [];
-              return [schedule.id, runs] as const;
-            }),
-          ),
-        );
-      } finally {
-        if (gen === loadGenRef.current) setRunsLoading(false);
-      }
-    },
-    [scheduleServer],
-  );
-
-  const loadSchedules = useCallback(
-    async ({ token, size, agentId }: { token: string | undefined; size: number; agentId: string }) => {
-      const gen = ++loadGenRef.current;
-      setLoading(true);
-      setError(null);
-      try {
-        const page = await scheduleServer.listSchedules({
-          limit: clampPageSize(size),
-          ...(token === undefined || token === '' ? {} : { pageToken: token }),
-          ...(agentId === 'all' ? {} : { agentIds: [agentId] }),
-        });
-        if (gen !== loadGenRef.current) return;
-        setSchedules(page.data);
-        setNextPageToken(page.nextPageToken);
-        setPreviousPageToken(page.previousPageToken);
-        void loadRunsForSchedules({ rows: page.data, gen });
-      } catch (caught) {
-        if (gen !== loadGenRef.current) return;
-        setError(getErrorMessage(caught, 'Check your connection and try again.'));
-        setSchedules([]);
-        setRunsByScheduleId({});
-        setNextPageToken(undefined);
-        setPreviousPageToken(undefined);
-      } finally {
-        if (gen === loadGenRef.current) setLoading(false);
-      }
-    },
-    [scheduleServer, loadRunsForSchedules],
-  );
-
-  const resetToFirstPage = useCallback(
-    (next?: { size?: number; agentId?: string }) => {
-      const size = next?.size ?? pageSize;
-      const agentId = next?.agentId ?? agentFilter;
-      setPageToken(undefined);
-      setPreviousPageToken(undefined);
-      void loadSchedules({ token: undefined, size, agentId });
-    },
-    [agentFilter, loadSchedules, pageSize],
+  const invalidateSchedules = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: queryKeys.schedules.all() }),
+    [queryClient],
   );
 
   // Keep filters in the URL so deep links and Agents → Schedules work.
@@ -279,7 +249,6 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
     setAgentFilter(current => {
       if (current === agentId) return current;
       setPageToken(undefined);
-      setPreviousPageToken(undefined);
       return agentId;
     });
   }, [agentId]);
@@ -302,7 +271,6 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
         const nextAgentFilter = agentId ?? next.agentFilter;
         if (current === nextAgentFilter) return current;
         setPageToken(undefined);
-        setPreviousPageToken(undefined);
         return nextAgentFilter;
       });
     };
@@ -311,10 +279,6 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
       window.removeEventListener('popstate', syncFromUrl);
     };
   }, [agentId]);
-
-  useEffect(() => {
-    void loadSchedules({ token: pageToken, size: pageSize, agentId: agentFilter });
-  }, [agentFilter, pageSize, pageToken, loadSchedules]);
 
   // Name + status are client-side on the current server page only.
   const filtered = useMemo(() => {
@@ -340,7 +304,7 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
         agent_id: schedule.agentId,
         next_status: nextStatus,
       });
-      await loadSchedules({ token: pageToken, size: pageSize, agentId: agentFilter });
+      await invalidateSchedules();
     } catch (caught) {
       toaster?.showError(caught);
     }
@@ -353,8 +317,7 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
       await scheduleServer.createScheduleRun({ scheduleId: schedule.id });
       track(AnalyticsEvents.Schedule.RUN_NOW, { schedule_id: schedule.id, agent_id: schedule.agentId });
       toaster?.showSuccess({ title: 'Run started' });
-      const runs = await scheduleServer.listScheduleRuns({ scheduleId: schedule.id });
-      setRunsByScheduleId(prev => ({ ...prev, [schedule.id]: runs }));
+      await queryClient.invalidateQueries({ queryKey: queryKeys.schedules.runs(schedule.id) });
     } catch (caught) {
       toaster?.showError(caught);
     } finally {
@@ -372,7 +335,8 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
     try {
       await scheduleServer.deleteSchedule({ id: schedule.id });
       track(AnalyticsEvents.Schedule.DELETED, { schedule_id: schedule.id, agent_id: schedule.agentId });
-      resetToFirstPage();
+      setPageToken(undefined);
+      void invalidateSchedules();
     } catch (caught) {
       toaster?.showError(caught);
     }
@@ -411,7 +375,6 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
                 onValueChange={value => {
                   setAgentFilter(value);
                   setPageToken(undefined);
-                  setPreviousPageToken(undefined);
                 }}
                 onAgentPicked={agent => {
                   setAgentLabelById(current => ({
@@ -476,7 +439,6 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
                   const next = clampPageSize(size);
                   setPageSize(next);
                   setPageToken(undefined);
-                  setPreviousPageToken(undefined);
                 }}
               />
             ) : null}
@@ -569,7 +531,6 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
                   const next = clampPageSize(size);
                   setPageSize(next);
                   setPageToken(undefined);
-                  setPreviousPageToken(undefined);
                 }}
               />
             )}
@@ -585,7 +546,7 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
           onOpenChange={open => {
             if (!open) setDrawer({ kind: 'closed' });
           }}
-          onSaved={() => resetToFirstPage()}
+          onSaved={() => setPageToken(undefined)}
         />
       ) : null}
       {drawer.kind === 'edit' ? (
@@ -596,7 +557,6 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
           onOpenChange={open => {
             if (!open) setDrawer({ kind: 'closed' });
           }}
-          onSaved={() => void loadSchedules({ token: pageToken, size: pageSize, agentId: agentFilter })}
         />
       ) : null}
       {pendingDelete != null ? (

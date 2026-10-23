@@ -12,6 +12,7 @@ import type {
   Schedule,
   ScheduleRun,
   ScheduleServer,
+  UpdateScheduleRequest,
 } from '@/server/types.js';
 import { createMockAgentUIServer } from '../../server/mockServer.js';
 
@@ -435,6 +436,28 @@ describe('SchedulesPage', () => {
     await waitFor(() => {
       expect(scheduleServer.deleteSchedule).toHaveBeenCalledWith({ id: 's1' });
     });
+  });
+
+  it('refreshes the cached list after pausing a schedule', async () => {
+    let current = sampleSchedules;
+    const updateSchedule = vi.fn(async (request: UpdateScheduleRequest): Promise<Schedule> => {
+      current = current.map(schedule =>
+        schedule.id === request.id ? { ...schedule, status: request.status ?? schedule.status } : schedule,
+      );
+      const updated = current.find(schedule => schedule.id === request.id);
+      if (updated == null) throw new Error('unknown schedule');
+      return updated;
+    });
+    const { scheduleServer } = renderPage(sampleSchedules, { updateSchedule }, async () => ({ data: current }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for daily-digest' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Pause' }));
+
+    await waitFor(() => {
+      expect(scheduleServer.listSchedules).toHaveBeenCalledTimes(2);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for daily-digest' }));
+    expect(await screen.findByRole('menuitem', { name: 'Resume' })).toBeInTheDocument();
   });
 
   it('toasts when pause or delete fails', async () => {

@@ -29,7 +29,9 @@ import { BottomSheet } from '../atoms/primitives/BottomSheet.js';
 import { RenameSessionModal } from '../atoms/RenameSessionModal.js';
 import { useResourcePermissions } from '../hooks/useResourcePermissions.js';
 import { Icon } from '../icons/Icon.js';
+import { useServerQueryClient } from '../server/queryClient.js';
 import { useOptionalServer } from '../server/ServerContext.js';
+import { fetchSessionDetail } from '../server/sessionQueries.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { useToasterOptional } from './ToasterContainer.js';
@@ -192,6 +194,7 @@ function ThreadListItemRow({
   const aui = useAui();
   const shell = useOptionalShellMode();
   const server = useOptionalServer();
+  const queryClient = useServerQueryClient();
   const runtimeKeyRef = useRef(shell?.runtimeKey);
   runtimeKeyRef.current = shell?.runtimeKey;
   const track = useTrackAnalytics();
@@ -294,8 +297,7 @@ function ThreadListItemRow({
           // A row created in this client has no custom yet; defaulting to mutable would
           // reopen a saved-agent chat as a draft, so ask the server first.
           if (remoteId != null && server != null && readThreadIsMutable(custom) === undefined && agentName == null) {
-            void server
-              .getSession({ sessionId: remoteId })
+            void fetchSessionDetail({ queryClient, server, sessionId: remoteId })
               .then(
                 session => ({ sessionMutable: session.isMutable, rowAgentName: session.agentName ?? undefined }),
                 () => ({ sessionMutable: threadListItemIsMutable(custom), rowAgentName: agentName }),

@@ -1,12 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
+import { useQueries, useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 
 import { useTrackAnalytics } from '../../analytics/AnalyticsProvider.js';
 import { AnalyticsEvents } from '../../analytics/events.js';
 import { useToasterOptional } from '../../containers/ToasterContainer.js';
 import { useOptionalCurrentUser } from '../../contexts/CurrentUserContext.js';
 import { Icon } from '../../icons/Icon.js';
+import { useServerQueryClient } from '../../server/queryClient.js';
+import { queryKeys } from '../../server/queryKeys.js';
 import { useSandboxEnvironmentServer } from '../../server/ServerContext.js';
 import { useOptionalShellMode } from '../../server/ShellModeContext.js';
 import type { SandboxEnvironment } from '../../server/types.js';
@@ -39,6 +42,7 @@ import { Tooltip } from '../primitives/Tooltip.js';
 import { formatNetworkingSummary, formatResourcesSummary, isEnvironmentReadOnly } from './environmentDisplay.js';
 import { EnvironmentFormDrawer } from './EnvironmentFormDrawer.js';
 import { EnvironmentStatusBadge } from './EnvironmentStatusBadge.js';
+import { useInvalidateEnvironments } from './useInvalidateEnvironments.js';
 
 type DrawerState = { kind: 'closed' } | { kind: 'create' } | { kind: 'edit'; environment: SandboxEnvironment };
 
@@ -62,52 +66,73 @@ export function EnvironmentsPage(_props: EnvironmentsPageProps) {
   const toaster = useToasterOptional();
   const track = useTrackAnalytics();
 
-  const [environments, setEnvironments] = useState<SandboxEnvironment[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useServerQueryClient();
+  const invalidateEnvironments = useInvalidateEnvironments();
   const [nameQuery, setNameQuery] = useState(() => readEnvironmentShareSearch(window.location.search).q ?? '');
   const [drawer, setDrawer] = useState<DrawerState>(() => initialDrawerState());
   const [pendingDelete, setPendingDelete] = useState<SandboxEnvironment | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [pageSize, setPageSize] = useState(() => clampPageSize(DEFAULT_TABLE_PAGE_SIZE));
   const [pageToken, setPageToken] = useState<string | undefined>(undefined);
-  const [nextPageToken, setNextPageToken] = useState<string | undefined>(undefined);
-  const [previousPageToken, setPreviousPageToken] = useState<string | undefined>(undefined);
-  const loadGenRef = useRef(0);
   const didConsumeIsNewRef = useRef(false);
   const wasSettingsOpenRef = useRef(shell?.settingsOpen ?? false);
   const settingsOpen = shell?.settingsOpen ?? false;
 
-  const loadEnvironments = useCallback(
-    async ({ token, size, silent = false }: { token: string | undefined; size: number; silent?: boolean }) => {
-      const gen = ++loadGenRef.current;
-      if (!silent) {
-        setLoading(true);
-        setError(null);
-      }
-      try {
-        const page = await environmentServer.listEnvironments({
-          limit: clampPageSize(size),
-          ...(token === undefined || token === '' ? {} : { pageToken: token }),
-        });
-        if (gen !== loadGenRef.current) return;
-        setEnvironments(page.data);
-        setNextPageToken(page.nextPageToken);
-        setPreviousPageToken(page.previousPageToken);
-      } catch (caught) {
-        if (gen !== loadGenRef.current) return;
-        if (!silent) {
-          setError(getErrorMessage(caught, 'Check your connection and try again.'));
-          setEnvironments([]);
-          setNextPageToken(undefined);
-          setPreviousPageToken(undefined);
-        }
-      } finally {
-        if (gen === loadGenRef.current && !silent) setLoading(false);
-      }
+  const listQuery = useQuery(
+    {
+      queryKey: queryKeys.environments.list({
+        limit: pageSize,
+        ...(pageToken === undefined || pageToken === '' ? {} : { pageToken }),
+      }),
+      queryFn: () =>
+        environmentServer.listEnvironments({
+          limit: pageSize,
+          ...(pageToken === undefined || pageToken === '' ? {} : { pageToken }),
+        }),
     },
-    [environmentServer],
+    queryClient,
   );
+  const page = listQuery.isError ? undefined : listQuery.data;
+  const loading = listQuery.isPending;
+  const error = listQuery.isError ? getErrorMessage(listQuery.error, 'Check your connection and try again.') : null;
+  const nextPageToken = page?.nextPageToken;
+  const previousPageToken = page?.previousPageToken;
+
+  // Poll pending environments individually; the list row seeds each detail so polling starts after one interval.
+  const pendingListed = useMemo(() => (page?.data ?? []).filter(env => env.status === 'pending'), [page]);
+  const pendingQueries = useQueries(
+    {
+      queries: pendingListed.map(env => ({
+        queryKey: queryKeys.environments.detail(env.name),
+        queryFn: () => environmentServer.getEnvironment({ name: env.name }),
+        initialData: env,
+        initialDataUpdatedAt: listQuery.dataUpdatedAt,
+        staleTime: PENDING_ENVIRONMENTS_POLL_INTERVAL_MS,
+        refetchInterval: PENDING_ENVIRONMENTS_POLL_INTERVAL_MS,
+      })),
+    },
+    queryClient,
+  );
+  const polledByName = useMemo(() => {
+    const byName = new Map<string, SandboxEnvironment>();
+    for (const query of pendingQueries) {
+      if (query.data != null) byName.set(query.data.name, query.data);
+    }
+    return byName;
+  }, [pendingQueries]);
+  const environments = useMemo(
+    () => (page?.data ?? []).map(item => (item.status === 'pending' ? (polledByName.get(item.name) ?? item) : item)),
+    [page, polledByName],
+  );
+  const settledPendingKey = pendingListed
+    .filter(env => (polledByName.get(env.name)?.status ?? 'pending') !== 'pending')
+    .map(env => env.name)
+    .join('\n');
+
+  // Pending envs becoming ready (or failed) must refresh the list and still-mounted pickers.
+  useEffect(() => {
+    if (settledPendingKey.length > 0) invalidateEnvironments();
+  }, [invalidateEnvironments, settledPendingKey]);
 
   useEffect(() => {
     replaceEnvironmentShareSearch({
@@ -116,46 +141,11 @@ export function EnvironmentsPage(_props: EnvironmentsPageProps) {
   }, [nameQuery]);
 
   useEffect(() => {
-    void loadEnvironments({ token: pageToken, size: pageSize });
-  }, [loadEnvironments, pageSize, pageToken]);
-
-  useEffect(() => {
     if (wasSettingsOpenRef.current && !settingsOpen) {
-      void loadEnvironments({ token: pageToken, size: pageSize });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all() });
     }
     wasSettingsOpenRef.current = settingsOpen;
-  }, [settingsOpen, loadEnvironments, pageToken, pageSize]);
-
-  // Poll individual pending environments using single-environment get API
-  useEffect(() => {
-    const pendingEnvs = environments.filter(env => env.status === 'pending');
-    if (pendingEnvs.length === 0) return;
-
-    const intervalId = window.setInterval(async () => {
-      try {
-        const updates = await Promise.all(
-          pendingEnvs.map(env => environmentServer.getEnvironment({ name: env.name }).catch(() => null)),
-        );
-        const resolved = updates.filter((u): u is SandboxEnvironment => u != null);
-        if (resolved.length === 0) return;
-
-        setEnvironments(prev =>
-          prev.map(item => {
-            const updated = resolved.find(u => u.name === item.name);
-            return updated ?? item;
-          }),
-        );
-        // Pending envs becoming ready (or failed) must refresh still-mounted pickers.
-        if (resolved.some(u => u.status !== 'pending')) {
-          shell?.invalidateEnvironmentsList();
-        }
-      } catch {
-        // Silently preserve current list on network error
-      }
-    }, PENDING_ENVIRONMENTS_POLL_INTERVAL_MS);
-
-    return () => window.clearInterval(intervalId);
-  }, [environments, environmentServer, shell]);
+  }, [queryClient, settingsOpen]);
 
   useEffect(() => {
     if (didConsumeIsNewRef.current) return;
@@ -199,8 +189,7 @@ export function EnvironmentsPage(_props: EnvironmentsPageProps) {
       toaster?.showSuccess({ title: 'Environment deleted' });
       setPendingDelete(null);
       setPageToken(undefined);
-      shell?.invalidateEnvironmentsList();
-      void loadEnvironments({ token: undefined, size: pageSize });
+      invalidateEnvironments();
     } catch (caught) {
       toaster?.showError(caught);
     } finally {
@@ -338,7 +327,6 @@ export function EnvironmentsPage(_props: EnvironmentsPageProps) {
                 onPageSizeChange={size => {
                   setPageSize(clampPageSize(size));
                   setPageToken(undefined);
-                  setPreviousPageToken(undefined);
                 }}
               />
             ) : null}
@@ -355,8 +343,6 @@ export function EnvironmentsPage(_props: EnvironmentsPageProps) {
         }}
         onSaved={() => {
           setPageToken(undefined);
-          shell?.invalidateEnvironmentsList();
-          void loadEnvironments({ token: undefined, size: pageSize });
         }}
       />
 

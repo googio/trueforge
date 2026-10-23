@@ -1,12 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useCallback, useEffect, useRef } from 'react';
 
+import { useServerQueryClient } from '../../server/queryClient.js';
+import { queryKeys } from '../../server/queryKeys.js';
 import { useOptionalSandboxEnvironmentServer } from '../../server/ServerContext.js';
 import { useOptionalShellMode } from '../../server/ShellModeContext.js';
 import type { SandboxEnvironment } from '../../server/types.js';
 import { drainListPages } from '../../utils/drainListPages.js';
 import { getErrorMessage } from '../../utils/getErrorMessage.js';
+
+const ALL_ENVIRONMENTS_PAGE_LIMIT = 1000;
+const EMPTY_ENVIRONMENTS: SandboxEnvironment[] = [];
 
 export type UseReadySandboxEnvironmentsResult = {
   environments: SandboxEnvironment[];
@@ -17,74 +23,60 @@ export type UseReadySandboxEnvironmentsResult = {
   refetch: () => Promise<void>;
 };
 
+function selectReady(environments: SandboxEnvironment[]): SandboxEnvironment[] {
+  return environments.filter(env => env.status === 'ready');
+}
+
 /**
  * Loads sandbox environments and filters strictly to ready (`status === 'ready'`) records.
  * Environments still building (`pending`) or failed (`failed`) are excluded.
  *
- * Re-fetches when the shell environments catalog epoch bumps (after manage CRUD /
- * activation) and when the Manage Environments overlay closes, so still-mounted
- * agent pickers stay in sync without remounting.
+ * Refreshes when environment mutations invalidate the cache and when the Manage Environments
+ * overlay closes, so still-mounted agent pickers stay in sync without remounting.
  */
 export function useReadySandboxEnvironments(): UseReadySandboxEnvironmentsResult {
   const environmentServer = useOptionalSandboxEnvironmentServer();
+  const queryClient = useServerQueryClient();
   const shell = useOptionalShellMode();
-  const environmentsListEpoch = shell?.environmentsListEpoch ?? 0;
   const environmentsOpen = shell?.environmentsOpen ?? false;
-  const [environments, setEnvironments] = useState<SandboxEnvironment[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const requestGenRef = useRef(0);
   const wasEnvironmentsOpenRef = useRef(environmentsOpen);
 
-  const fetchReadyEnvironments = useCallback(async () => {
-    if (!environmentServer) {
-      setEnvironments([]);
-      setLoaded(false);
-      setLoading(false);
-      setError(null);
-      return;
-    }
-
-    const gen = ++requestGenRef.current;
-    setLoading(true);
-    setError(null);
-
-    try {
-      const all = await drainListPages({
-        fetchPage: pageToken => environmentServer.listEnvironments({ limit: 1000, pageToken }),
-      });
-      if (gen !== requestGenRef.current) return;
-      const readyOnly = all.filter(env => env.status === 'ready');
-      setEnvironments(readyOnly);
-      setLoaded(true);
-    } catch (caught) {
-      if (gen !== requestGenRef.current) return;
-      setError(getErrorMessage(caught, 'Failed to load sandbox environments.'));
-      setEnvironments([]);
-    } finally {
-      if (gen === requestGenRef.current) {
-        setLoading(false);
-      }
-    }
-  }, [environmentServer]);
-
-  useEffect(() => {
-    void fetchReadyEnvironments();
-  }, [fetchReadyEnvironments, environmentsListEpoch]);
+  const readyQuery = useQuery(
+    {
+      queryKey: queryKeys.environments.allPages({ limit: ALL_ENVIRONMENTS_PAGE_LIMIT }),
+      queryFn: () => {
+        if (environmentServer == null) throw new Error('Sandbox environments are not configured.');
+        return drainListPages({
+          fetchPage: pageToken => environmentServer.listEnvironments({ limit: ALL_ENVIRONMENTS_PAGE_LIMIT, pageToken }),
+        });
+      },
+      enabled: environmentServer != null,
+      select: selectReady,
+    },
+    queryClient,
+  );
 
   useEffect(() => {
     if (wasEnvironmentsOpenRef.current && !environmentsOpen) {
-      void fetchReadyEnvironments();
+      void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all() });
     }
     wasEnvironmentsOpenRef.current = environmentsOpen;
-  }, [environmentsOpen, fetchReadyEnvironments]);
+  }, [environmentsOpen, queryClient]);
 
+  const { refetch: refetchQuery } = readyQuery;
+  const refetch = useCallback(async () => {
+    if (environmentServer == null) return;
+    await refetchQuery();
+  }, [environmentServer, refetchQuery]);
+
+  if (environmentServer == null) {
+    return { environments: EMPTY_ENVIRONMENTS, loading: false, loaded: false, error: null, refetch };
+  }
   return {
-    environments,
-    loading,
-    loaded,
-    error,
-    refetch: fetchReadyEnvironments,
+    environments: readyQuery.isError ? EMPTY_ENVIRONMENTS : (readyQuery.data ?? EMPTY_ENVIRONMENTS),
+    loading: readyQuery.isFetching,
+    loaded: readyQuery.data !== undefined,
+    error: readyQuery.isError ? getErrorMessage(readyQuery.error, 'Failed to load sandbox environments.') : null,
+    refetch,
   };
 }

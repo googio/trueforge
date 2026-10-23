@@ -1,5 +1,6 @@
 'use client';
 
+import { keepPreviousData, queryOptions, useQuery } from '@tanstack/react-query';
 import {
   createContext,
   createElement,
@@ -11,19 +12,12 @@ import {
   type ReactNode,
 } from 'react';
 
+import { useServerQueryClient } from '../server/queryClient.js';
+import { queryKeys } from '../server/queryKeys.js';
 import { useOptionalPermissionsServer } from '../server/ServerContext.js';
 import type { PermissionResourceType, PermissionsServer, ResourcePermission } from '../server/types.js';
 
 const PERMISSIONS_BATCH_SIZE = 100;
-
-type PermissionsLoadState = {
-  server: PermissionsServer | null;
-  resourceType: PermissionResourceType | null;
-  key: string;
-  data: Record<string, ResourcePermission[]>;
-  loading: boolean;
-  error: unknown | null;
-};
 
 export type UseResourcePermissionsOptions = {
   resourceType: PermissionResourceType;
@@ -50,6 +44,32 @@ function permissionBatches(resourceIds: string[]): string[][] {
   return batches;
 }
 
+/** Grants per resource id, shared by every reader of the same id set. */
+export function resourcePermissionsQuery({
+  server,
+  resourceType,
+  resourceIds,
+}: {
+  server: PermissionsServer | null;
+  resourceType: PermissionResourceType;
+  resourceIds: string[];
+}) {
+  return queryOptions({
+    queryKey: queryKeys.permissions.list({ resourceType, resourceIds }),
+    queryFn: async () => {
+      if (server == null) throw new Error('Permissions server is not configured.');
+      const responses = await Promise.all(
+        permissionBatches(resourceIds).map(resourceIdsBatch =>
+          server.listPermissions({ resourceType, resourceIds: resourceIdsBatch }),
+        ),
+      );
+      const permissions: Record<string, ResourcePermission[]> = {};
+      for (const response of responses) Object.assign(permissions, response.data.permissions);
+      return permissions;
+    },
+  });
+}
+
 export function useResourcePermissions({
   resourceType,
   resourceIds,
@@ -57,72 +77,40 @@ export function useResourcePermissions({
   const server = useOptionalPermissionsServer();
   const idsKey = JSON.stringify([...new Set(resourceIds.filter(resourceId => resourceId.length > 0))]);
   const hasResourceIds = idsKey !== '[]';
-  const requestKey = `${resourceType}:${idsKey}`;
   const requestedIds = useMemo(() => parseResourceIds(idsKey), [idsKey]);
   const requestedIdSet = useMemo(() => new Set(requestedIds), [requestedIds]);
-  const [state, setState] = useState<PermissionsLoadState>({
-    server: null,
-    resourceType: null,
-    key: '',
-    data: {},
-    loading: false,
-    error: null,
-  });
+  const queryClient = useServerQueryClient();
+  const enabled = server != null && hasResourceIds;
+  const permissionsQuery = useQuery(
+    {
+      ...resourcePermissionsQuery({ server, resourceType, resourceIds: requestedIds }),
+      enabled,
+      // Keep prior grants on screen while a new id set loads; `allows` still gates by requested ids.
+      placeholderData: keepPreviousData,
+    },
+    queryClient,
+  );
 
+  const loading = enabled && (permissionsQuery.isPending || permissionsQuery.isFetching);
+  const error: unknown = enabled && !permissionsQuery.isPlaceholderData ? permissionsQuery.error : null;
+  // A failed wider request keeps the grants already known for this resource type.
+  const [lastGrants, setLastGrants] = useState<{
+    resourceType: PermissionResourceType;
+    data: Record<string, ResourcePermission[]>;
+  } | null>(null);
+  const settledData = permissionsQuery.isPlaceholderData ? undefined : permissionsQuery.data;
   useEffect(() => {
-    if (server == null || !hasResourceIds) return;
-
-    let cancelled = false;
-    setState(current =>
-      current.server === server && current.resourceType === resourceType
-        ? { ...current, key: requestKey, loading: true, error: null }
-        : { server, resourceType, key: requestKey, data: {}, loading: true, error: null },
-    );
-    void Promise.all(
-      permissionBatches(requestedIds).map(resourceIdsBatch =>
-        server.listPermissions({ resourceType, resourceIds: resourceIdsBatch }),
-      ),
-    ).then(
-      responses => {
-        if (cancelled) return;
-        setState({
-          server,
-          resourceType,
-          key: requestKey,
-          data: Object.assign({}, ...responses.map(response => response.data.permissions)),
-          loading: false,
-          error: null,
-        });
-      },
-      caught => {
-        if (cancelled) return;
-        setState(current => ({
-          server,
-          resourceType,
-          key: requestKey,
-          data: current.server === server && current.resourceType === resourceType ? current.data : {},
-          loading: false,
-          error: caught,
-        }));
-      },
-    );
-
-    return () => {
-      cancelled = true;
-    };
-  }, [hasResourceIds, requestKey, requestedIds, resourceType, server]);
-
-  const sameScope = state.server === server && state.resourceType === resourceType;
-  const loading = server != null && hasResourceIds && (!sameScope || state.key !== requestKey || state.loading);
-  const error = sameScope && state.key === requestKey ? state.error : null;
+    if (settledData != null) setLastGrants({ resourceType, data: settledData });
+  }, [resourceType, settledData]);
+  const data = permissionsQuery.data ?? (lastGrants?.resourceType === resourceType ? lastGrants.data : undefined);
 
   const allows = useCallback(
     (resourceId: string | null | undefined, permission: ResourcePermission) => {
       if (server == null || resourceId == null || resourceId === '') return true;
-      if (!requestedIdSet.has(resourceId) || !sameScope) return false;
-      return (state.data[resourceId] ?? []).includes(permission);
+      if (!requestedIdSet.has(resourceId) || data == null) return false;
+      return (data[resourceId] ?? []).includes(permission);
     },
-    [requestedIdSet, sameScope, server, state.data],
+    [data, requestedIdSet, server],
   );
 
   return { loading, error, allows };

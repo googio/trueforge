@@ -270,6 +270,25 @@ describe('EnvironmentsPage', () => {
       environment_id: 'e1',
     });
   });
+
+  it('refetches the list after deleting an environment', async () => {
+    const deleteEnvironment = vi.fn(async () => {});
+    const listEnvironments = vi
+      .fn()
+      .mockResolvedValueOnce({ data: sampleEnvironments })
+      .mockResolvedValue({ data: sampleEnvironments.filter(env => env.name !== 'python-data') });
+    renderPage({ environmentOverrides: { deleteEnvironment, listEnvironments } });
+    await waitFor(() => {
+      expect(screen.getByText('python-data')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete python-data' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(screen.queryByText('python-data')).not.toBeInTheDocument());
+    expect(listEnvironments).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('EnvironmentsButton', () => {

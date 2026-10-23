@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { AnalyticsProvider } from '@/analytics/AnalyticsProvider.js';
 import { AnalyticsEvents } from '@/analytics/events.js';
 import type { TrackAnalytics } from '@/analytics/types.js';
+import { DraftCatalogProvider, useDraftCatalog } from '@/atoms/draft/DraftCatalogProvider.js';
 import SkillSettings from '@/containers/SettingsBuilder/SkillSettings.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import type { CreateSkillRequest, DefinedSkill, SkillCatalogEntry } from '@/server/types.js';
@@ -292,5 +293,58 @@ describe('SkillSettings', () => {
     expect(screen.getByRole('button', { name: 'Enable Code Review' })).toBeDisabled();
     expect(screen.getByRole('button', { name: /Import from GitHub/ })).toBeDisabled();
     expect(createSkill).toHaveBeenCalledOnce();
+  });
+
+  it('reuses cached skills on remount and refetches settings and picker skills after a write', async () => {
+    const listSkills = vi.fn(async (): Promise<DefinedSkill[]> => []);
+    const getSkills = vi.fn(async () => []);
+    const server = createMockAgentUIServer({
+      getSkills,
+      catalog: createMockCatalog({
+        skillCatalog: {
+          getSkillCatalog: async () => [catalogEntry],
+          listSkills,
+          createSkill: async () => ({ id: 'db-cat-code-review', name: 'Code Review', description: '' }),
+        },
+      }),
+    });
+
+    function PickerProbe() {
+      const { ensureLoaded } = useDraftCatalog();
+      useEffect(() => ensureLoaded(), [ensureLoaded]);
+      return null;
+    }
+
+    function Harness() {
+      const [shown, setShown] = useState(true);
+      return (
+        <>
+          <button type="button" onClick={() => setShown(value => !value)}>
+            Toggle
+          </button>
+          {shown ? <SkillSettings /> : null}
+        </>
+      );
+    }
+
+    render(
+      <ServerProvider server={server}>
+        <DraftCatalogProvider>
+          <PickerProbe />
+          <Harness />
+        </DraftCatalogProvider>
+      </ServerProvider>,
+    );
+
+    await screen.findByRole('button', { name: 'Enable Code Review' });
+    await waitFor(() => expect(getSkills).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle' }));
+    await screen.findByRole('button', { name: 'Enable Code Review' });
+    expect(listSkills).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enable Code Review' }));
+    await waitFor(() => expect(listSkills).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getSkills).toHaveBeenCalledTimes(2));
   });
 });

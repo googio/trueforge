@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useCallback, useMemo, useState, type FormEvent } from 'react';
 
 import { useTrackAnalytics } from '@/analytics/AnalyticsProvider.js';
 import { AnalyticsEvents } from '@/analytics/events.js';
@@ -12,6 +13,8 @@ import { CenteredModal } from '@/atoms/primitives/CenteredModal.js';
 import SearchInput from '@/atoms/primitives/SearchInput.js';
 import { useMCPAuth } from '@/hooks/useMcpAuth.js';
 import { Icon } from '@/icons/Icon.js';
+import { CATALOG_STALE_TIME_MS, useServerQueryClient } from '@/server/queryClient.js';
+import { queryKeys } from '@/server/queryKeys.js';
 import { useCatalogServer } from '@/server/ServerContext.js';
 import type { ConnectorAuth, ConnectorBase, ConnectorCatalogEntry } from '@/server/types.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
@@ -24,107 +27,104 @@ import ConnectorDetails from './ConnectorDetails.js';
 type ConnectorListItem =
   { connector: ConnectorBase; isConfigured: true } | { connector: ConnectorCatalogEntry; isConfigured: false };
 
-type ConnectorsState = {
-  ordered: ConnectorListItem[];
-  authStatusById: Map<string, boolean>;
-};
+const EMPTY_CONFIGURED: ConnectorBase[] = [];
+const EMPTY_CATALOG: ConnectorCatalogEntry[] = [];
 
 const ConnectorSettings = () => {
   const { connectorCatalog } = useCatalogServer();
+  const queryClient = useServerQueryClient();
   const toaster = useToasterOptional();
   const track = useTrackAnalytics();
   const { handleAuthorize, isOAuthLoading } = useMCPAuth();
 
   const [query, setQuery] = useState('');
-  const [connectors, setConnectors] = useState<ConnectorsState>({
-    ordered: [],
-    authStatusById: new Map(),
-  });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const [catalog, setCatalog] = useState<ConnectorCatalogEntry[]>([]);
   const [addMcpServerFormOpen, setAddMcpServerFormOpen] = useState(false);
   const [editingConnector, setEditingConnector] = useState<ConnectorBase | null>(null);
   const [connectorAwaitingKey, setConnectorAwaitingKey] = useState<ConnectorCatalogEntry | null>(null);
-  const [selectedConnector, setSelectedConnector] = useState<ConnectorBase | null>(null);
+  // Track the id so the detail view always shows the latest cached connector.
+  const [selectedConnectorId, setSelectedConnectorId] = useState<string | null>(null);
   const [authorizingId, setAuthorizingId] = useState<string | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<ConnectorBase | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState('');
 
+  const configuredQuery = useQuery(
+    {
+      queryKey: queryKeys.settings.connectors(),
+      queryFn: () => connectorCatalog.listConnectors(),
+      staleTime: CATALOG_STALE_TIME_MS,
+    },
+    queryClient,
+  );
+  const catalogQuery = useQuery(
+    {
+      queryKey: queryKeys.catalog.connectorCatalog(),
+      queryFn: () => connectorCatalog.getConnectorCatalog(),
+      staleTime: CATALOG_STALE_TIME_MS,
+    },
+    queryClient,
+  );
+  const configured = configuredQuery.data ?? EMPTY_CONFIGURED;
+  const catalog = catalogQuery.data ?? EMPTY_CATALOG;
+  const loading = configuredQuery.isPending || catalogQuery.isPending;
+  const loadError = configuredQuery.error ?? catalogQuery.error;
+  const error = loadError == null ? mutationError : getErrorMessage(loadError, 'Failed to load connectors');
+  const selectedConnector =
+    selectedConnectorId == null ? null : (configured.find(item => item.id === selectedConnectorId) ?? null);
+
   const connectorIconMap = useMemo(() => {
-    return (catalog ?? []).reduce(
-      (acc, entry) => {
-        acc[entry.name] = entry.logo ?? '';
-        return acc;
-      },
-      {} as Record<string, string>,
-    );
+    return catalog.reduce<Record<string, string>>((acc, entry) => {
+      acc[entry.name] = entry.logo ?? '';
+      return acc;
+    }, {});
   }, [catalog]);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [listed, available] = await Promise.all([
-        connectorCatalog.listConnectors(),
-        connectorCatalog.getConnectorCatalog(),
-      ]);
-      setCatalog(available);
-      const configured = listed ?? [];
-      const seenIds = new Set(configured.map(connector => connector.id));
-      const ordered: ConnectorListItem[] = [
-        ...configured.map<ConnectorListItem>(connector => ({ connector, isConfigured: true })),
-        ...available
-          .filter(connector => !seenIds.has(connector.id))
-          .map<ConnectorListItem>(connector => ({ connector, isConfigured: false })),
-      ];
-      setConnectors({
-        ordered,
-        authStatusById: new Map(
-          ordered.map(item => [item.connector.id, item.isConfigured ? item.connector.authenticated : false]),
-        ),
-      });
-      setSelectedConnector(current => (current ? (listed.find(item => item.id === current.id) ?? null) : null));
-    } catch (err) {
-      setError(getErrorMessage(err, 'Failed to load connectors'));
-    } finally {
-      setLoading(false);
-    }
-  }, [connectorCatalog]);
+  const orderedConnectors = useMemo(() => {
+    const seenIds = new Set(configured.map(connector => connector.id));
+    return [
+      ...configured.map<ConnectorListItem>(connector => ({ connector, isConfigured: true })),
+      ...catalog
+        .filter(connector => !seenIds.has(connector.id))
+        .map<ConnectorListItem>(connector => ({ connector, isConfigured: false })),
+    ];
+  }, [catalog, configured]);
 
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const refresh = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings.connectors() }),
+      // Tool lists depend on the connector's auth state.
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings.connectorToolsAll() }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.catalog.mcpToolsAll() }),
+      // Pickers and the config drawer read connector auth state from these.
+      queryClient.invalidateQueries({ queryKey: queryKeys.catalog.mcp() }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.catalog.mcpConnectors() }),
+    ]);
+  }, [queryClient]);
 
   const normalizedQuery = query.trim().toLowerCase();
 
   const matchingConnectors = useMemo(() => {
-    if (!normalizedQuery) return connectors.ordered;
-    return connectors.ordered.filter(({ connector }) => {
+    if (!normalizedQuery) return orderedConnectors;
+    return orderedConnectors.filter(({ connector }) => {
       return (
         connector.name.toLowerCase().includes(normalizedQuery) ||
         (connector.description?.toLowerCase().includes(normalizedQuery) ?? false) ||
         connector.url.toLowerCase().includes(normalizedQuery)
       );
     });
-  }, [connectors.ordered, normalizedQuery]);
+  }, [orderedConnectors, normalizedQuery]);
 
   const matchingConnected = useMemo(() => {
     const result: ConnectorBase[] = [];
     for (const item of matchingConnectors) {
-      if (item.isConfigured) {
-        const authenticated = connectors.authStatusById.get(item.connector.id) ?? item.connector.authenticated;
-        result.push(
-          authenticated === item.connector.authenticated ? item.connector : { ...item.connector, authenticated },
-        );
-      }
+      if (item.isConfigured) result.push(item.connector);
     }
     return result;
-  }, [connectors.authStatusById, matchingConnectors]);
+  }, [matchingConnectors]);
 
   const availableConnectors = useMemo(() => {
     const result: ConnectorCatalogEntry[] = [];
@@ -134,14 +134,14 @@ const ConnectorSettings = () => {
     return result;
   }, [matchingConnectors]);
 
-  const runMutation = async (fn: () => Promise<void>, setMutationError = setError) => {
+  const runMutation = async (fn: () => Promise<void>, reportError = setMutationError) => {
     setBusy(true);
-    setError(null);
+    setMutationError(null);
     try {
       await fn();
       await refresh();
     } catch (err) {
-      setMutationError(getErrorMessage(err, 'Request failed'));
+      reportError(getErrorMessage(err, 'Request failed'));
       throw err;
     } finally {
       setBusy(false);
@@ -232,7 +232,7 @@ const ConnectorSettings = () => {
     void runMutation(async () => {
       await connectorCatalog.disconnectConnector({ id: connector.id });
       track(AnalyticsEvents.Settings.CONNECTOR_DISCONNECTED, { connector_name: connector.name });
-      setSelectedConnector(null);
+      setSelectedConnectorId(null);
     }).catch(() => {});
   };
 
@@ -250,25 +250,16 @@ const ConnectorSettings = () => {
       await deleteConnector({ id: connector.id });
       track(AnalyticsEvents.Settings.CONNECTOR_DELETED, { connector_name: connector.name });
       setPendingRemoval(null);
-      setSelectedConnector(null);
+      setSelectedConnectorId(null);
     }, setRemoveError).catch(() => {});
   };
 
   const handleConnectorRefreshed = (refreshedConnector: ConnectorBase) => {
-    setSelectedConnector(current => (current?.id === refreshedConnector.id ? refreshedConnector : current));
-    setConnectors(current => {
-      const authStatusById = new Map(current.authStatusById);
-      authStatusById.set(refreshedConnector.id, refreshedConnector.authenticated);
-
-      return {
-        ordered: current.ordered.map(item =>
-          item.isConfigured && item.connector.id === refreshedConnector.id
-            ? { connector: refreshedConnector, isConfigured: true }
-            : item,
-        ),
-        authStatusById,
-      };
-    });
+    queryClient.setQueryData(queryKeys.settings.connectors(), (current: ConnectorBase[] | undefined) =>
+      current?.map(item => (item.id === refreshedConnector.id ? refreshedConnector : item)),
+    );
+    void queryClient.invalidateQueries({ queryKey: queryKeys.catalog.mcp() });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.catalog.mcpConnectors() });
   };
 
   const renderConnector = (connector: ConnectorBase, isConnected: boolean) => {
@@ -322,7 +313,7 @@ const ConnectorSettings = () => {
           key={connector.id}
           className={`${rowClassName} cursor-pointer transition-colors hover:bg-ghost-button-hover/60`}
           onClick={() => {
-            setSelectedConnector(connector);
+            setSelectedConnectorId(connector.id);
           }}
         >
           <div className="flex min-w-0 flex-1 items-center gap-3">{content}</div>
@@ -452,7 +443,7 @@ const ConnectorSettings = () => {
           connector={selectedConnector}
           busy={busy}
           onBack={() => {
-            setSelectedConnector(null);
+            setSelectedConnectorId(null);
           }}
           onConnectorRefreshed={handleConnectorRefreshed}
           onEdit={() => {

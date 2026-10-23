@@ -14,6 +14,8 @@ import {
   writeDraftSpecPreferences,
   type DraftPreferenceKind,
 } from './draftSpecPreferences.js';
+import { useServerQueryClient } from './queryClient.js';
+import { queryKeys } from './queryKeys.js';
 import {
   isEnvironmentsChromeEnabled,
   isSchedulesChromeEnabled,
@@ -193,7 +195,6 @@ type ShellModeContextValue = {
    * Bumped when sandbox environments may have changed (create/update/delete/ready).
    * Agent environment pickers should re-fetch when this changes.
    */
-  environmentsListEpoch: number;
   invalidateEnvironmentsList: () => void;
 };
 
@@ -254,6 +255,7 @@ export function ShellModeProvider({
   initialSettingsOpen?: boolean;
   children: ReactNode;
 }) {
+  const queryClient = useServerQueryClient();
   const capabilities = useServerCapabilities();
   const capabilitiesPending = !useServerCapabilitiesSettled();
   const catalog = useOptionalCatalogServer();
@@ -277,7 +279,6 @@ export function ShellModeProvider({
   const [mutableEpoch, setMutableEpoch] = useState(0);
   const [clearEpoch, setClearEpoch] = useState(0);
   const [agentsListEpoch, setAgentsListEpoch] = useState(0);
-  const [environmentsListEpoch, setEnvironmentsListEpoch] = useState(0);
   const [settingsOpenState, setSettingsOpenState] = useState(initialSettingsOpen);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('models');
   const [agentConfigOpenState, setAgentConfigOpenState] = useState(false);
@@ -455,12 +456,13 @@ export function ShellModeProvider({
   }, [environmentsEnabled]);
 
   const invalidateAgentsList = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.agents.all() });
     setAgentsListEpoch(n => n + 1);
-  }, []);
+  }, [queryClient]);
 
   const invalidateEnvironmentsList = useCallback(() => {
-    setEnvironmentsListEpoch(n => n + 1);
-  }, []);
+    void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all() });
+  }, [queryClient]);
 
   const lockedAgentName = agentConfig.mode === 'SingleAgent' ? agentConfig.name : '';
   const effectiveMode: ShellMode = useMemo(() => {
@@ -921,7 +923,6 @@ export function ShellModeProvider({
       pendingSessionEpoch,
       agentsListEpoch,
       invalidateAgentsList,
-      environmentsListEpoch,
       invalidateEnvironmentsList,
     }),
     [
@@ -968,7 +969,6 @@ export function ShellModeProvider({
       pendingSessionEpoch,
       agentsListEpoch,
       invalidateAgentsList,
-      environmentsListEpoch,
       invalidateEnvironmentsList,
     ],
   );

@@ -1,12 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useMemo, useState, type ReactNode } from 'react';
 
 import { useTrackAnalytics } from '@/analytics/AnalyticsProvider.js';
 import { AnalyticsEvents } from '@/analytics/events.js';
 import { Button } from '@/atoms/primitives/Button.js';
 import SearchInput from '@/atoms/primitives/SearchInput.js';
 import { Icon } from '@/icons/Icon.js';
+import { CATALOG_STALE_TIME_MS, useServerQueryClient } from '../../server/queryClient.js';
+import { queryKeys } from '../../server/queryKeys.js';
 import { useCatalogServer } from '../../server/ServerContext.js';
 import type { RegistrySkill, SkillBase, SkillCatalogEntry, SkillConfigBase } from '../../server/types.js';
 import { getErrorMessage } from '../../utils/getErrorMessage.js';
@@ -23,16 +26,16 @@ function isManagedSkillError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && Reflect.get(error, 'statusCode') === 424;
 }
 
+const EMPTY_LIST: SkillBase[] = [];
+const EMPTY_CATALOG: SkillCatalogEntry[] = [];
+
 const SkillSettings = () => {
   const { skillCatalog } = useCatalogServer();
   const toaster = useToasterOptional();
   const track = useTrackAnalytics();
 
   const [query, setQuery] = useState('');
-  const [skills, setSkills] = useState<SkillBase[]>([]);
-  const [catalog, setCatalog] = useState<SkillCatalogEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [managedExternally, setManagedExternally] = useState(false);
@@ -40,24 +43,32 @@ const SkillSettings = () => {
   const [pendingRemoval, setPendingRemoval] = useState<SkillBase | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
-    if (!skillCatalog) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const [defined, available] = await Promise.all([skillCatalog.listSkills(), skillCatalog.getSkillCatalog()]);
-      setSkills(defined);
-      setCatalog(available);
-    } catch (err) {
-      setError(getErrorMessage(err, 'Failed to load skills'));
-    } finally {
-      setLoading(false);
-    }
-  }, [skillCatalog]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const queryClient = useServerQueryClient();
+  const listQuery = useQuery(
+    {
+      queryKey: queryKeys.settings.skills(),
+      queryFn: () =>
+        skillCatalog == null ? Promise.reject(new Error('Catalog is not available.')) : skillCatalog.listSkills(),
+      enabled: skillCatalog != null,
+      staleTime: CATALOG_STALE_TIME_MS,
+    },
+    queryClient,
+  );
+  const catalogQuery = useQuery(
+    {
+      queryKey: queryKeys.settings.skillCatalog(),
+      queryFn: () =>
+        skillCatalog == null ? Promise.reject(new Error('Catalog is not available.')) : skillCatalog.getSkillCatalog(),
+      enabled: skillCatalog != null,
+      staleTime: CATALOG_STALE_TIME_MS,
+    },
+    queryClient,
+  );
+  const skills = listQuery.data ?? EMPTY_LIST;
+  const catalog = catalogQuery.data ?? EMPTY_CATALOG;
+  const loading = listQuery.isPending || catalogQuery.isPending;
+  const loadError = listQuery.error ?? catalogQuery.error;
+  const error = actionError ?? (loadError == null ? null : getErrorMessage(loadError, 'Failed to load skills'));
 
   const normalizedQuery = query.trim().toLowerCase();
 
@@ -73,12 +84,14 @@ const SkillSettings = () => {
     );
   }, [catalog, skills, normalizedQuery]);
 
-  const runMutation = async (fn: () => Promise<void>, setMutationError = setError) => {
+  const runMutation = async (fn: () => Promise<void>, setMutationError = setActionError) => {
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       await fn();
-      await refresh();
+      await queryClient.invalidateQueries({ queryKey: queryKeys.settings.skills() });
+      // Agent skill pickers read the same skills.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.catalog.skills() });
     } catch (err) {
       if (isManagedSkillError(err)) setManagedExternally(true);
       setMutationError(getErrorMessage(err, 'Request failed'));

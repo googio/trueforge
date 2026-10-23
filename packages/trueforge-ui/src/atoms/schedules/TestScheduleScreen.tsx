@@ -4,6 +4,8 @@ import { useEffect, useState, type ReactNode } from 'react';
 
 import { useToasterOptional } from '../../containers/ToasterContainer.js';
 import { Icon } from '../../icons/Icon.js';
+import { useServerQueryClient } from '../../server/queryClient.js';
+import { queryKeys } from '../../server/queryKeys.js';
 import { useOptionalCatalogServer, useScheduleServer } from '../../server/ServerContext.js';
 import type { ConnectorState, Schedule, ScheduleRun } from '../../server/types.js';
 import { useDraftCatalog } from '../draft/DraftCatalogProvider.js';
@@ -53,6 +55,7 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
 
 export function TestScheduleScreen({ schedule, agentName, mcpMounts, onEditConfiguration }: TestScheduleScreenProps) {
   const scheduleServer = useScheduleServer();
+  const queryClient = useServerQueryClient();
   const toaster = useToasterOptional();
   const { connectors, ensureLoaded, refreshConnectors, loading, error } = useDraftCatalog();
   const [running, setRunning] = useState(false);
@@ -63,6 +66,7 @@ export function TestScheduleScreen({ schedule, agentName, mcpMounts, onEditConfi
     setRunning(true);
     try {
       const run = await scheduleServer.createScheduleRun({ scheduleId: schedule.id });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.schedules.runs(schedule.id) });
       setLastTestRun(run);
       toaster?.showSuccess({ title: 'Test run started' });
     } catch (caught) {

@@ -1,15 +1,20 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useLayoutEffect, useRef, useState } from 'react';
 
 import { cn } from '../../atoms/lib/cn.js';
 import { Button } from '../../atoms/primitives/Button.js';
 import { useMCPAuth } from '../../hooks/useMcpAuth.js';
 import { Icon } from '../../icons/Icon.js';
+import { useServerQueryClient } from '../../server/queryClient.js';
+import { queryKeys } from '../../server/queryKeys.js';
 import { useCatalogServer } from '../../server/ServerContext.js';
 import type { ConnectorBase, ToolBase } from '../../server/types.js';
 import { getErrorMessage } from '../../utils/getErrorMessage.js';
 import { AUTH_TYPE_LABELS } from './authTypeLabels.js';
+
+const EMPTY_TOOLS: ToolBase[] = [];
 
 type ConnectorDetailsProps = {
   connector: ConnectorBase;
@@ -106,46 +111,35 @@ const ConnectorDetails = ({
   busy = false,
 }: ConnectorDetailsProps) => {
   const { connectorCatalog } = useCatalogServer();
+  const queryClient = useServerQueryClient();
   const { handleAuthorize, isOAuthLoading } = useMCPAuth();
-  const [tools, setTools] = useState<ToolBase[]>([]);
-  const [toolsLoading, setToolsLoading] = useState(true);
-  const [toolsError, setToolsError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [refreshingAfterAuth, setRefreshingAfterAuth] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    setTools([]);
-    setToolsError(null);
-    setToolsLoading(true);
-
-    void connectorCatalog
-      .getToolsByConnectorId({ id: connector.id })
-      .then(result => {
-        if (!cancelled) setTools(result);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          setToolsError(getErrorMessage(err, 'Failed to load connector tools'));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setToolsLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [connector.authenticated, connector.id, connectorCatalog]);
+  const toolsQuery = useQuery(
+    {
+      queryKey: queryKeys.settings.connectorTools(connector.id),
+      queryFn: () => connectorCatalog.getToolsByConnectorId({ id: connector.id }),
+    },
+    queryClient,
+  );
+  const tools = toolsQuery.data ?? EMPTY_TOOLS;
+  const toolsLoading = toolsQuery.isPending;
+  const toolsError =
+    refreshError ??
+    (toolsQuery.error == null ? null : getErrorMessage(toolsQuery.error, 'Failed to load connector tools'));
 
   const refreshAfterAuthentication = async () => {
     setRefreshingAfterAuth(true);
-    setToolsError(null);
+    setRefreshError(null);
 
     try {
       const refreshedConnector = await connectorCatalog.getConnector({ id: connector.id });
       onConnectorRefreshed(refreshedConnector);
+      // Tools become listable once the connector is authenticated.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.settings.connectorTools(connector.id) });
     } catch (err: unknown) {
-      setToolsError(getErrorMessage(err, 'Failed to refresh connector details'));
+      setRefreshError(getErrorMessage(err, 'Failed to refresh connector details'));
     } finally {
       setRefreshingAfterAuth(false);
     }
