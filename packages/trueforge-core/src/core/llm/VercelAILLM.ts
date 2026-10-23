@@ -35,6 +35,7 @@ import type {
   ChatCompletionTool,
 } from 'openai/resources/chat';
 import type { Logger } from 'winston';
+import { ModelProviderError } from '../errors';
 import { describeUnknownError, extractErrorLogFields, type ErrorLogFields } from '../util/errorLogFields';
 import { modelSsrfFetch } from '../util/outboundFetch';
 import type { ILLM, LLMCreateParams, LLMCreateParamsStreaming } from './ILLM';
@@ -46,6 +47,7 @@ import {
   type RawAssistantMessageWithUsage,
   type ThinkingBlock,
 } from './LLMTypes';
+import { resolveMaxOutputTokens } from './usage';
 
 /** Correlates harness model calls with TrueFoundry AI Gateway request traces. */
 export const X_TFY_REQUEST_ID = 'x-tfy-request-id';
@@ -582,14 +584,6 @@ export function buildProviderOptions({
 // Request conversion (OpenAI → SDK)
 // ---------------------------------------------------------------------------
 
-/** Prefers `max_completion_tokens`, falling back to the deprecated `max_tokens`. */
-export function resolveMaxOutputTokens(
-  body: Pick<ChatCompletionCreateParamsStreaming, 'max_completion_tokens'>,
-): number | undefined {
-  const limit: unknown = body.max_completion_tokens ?? Reflect.get(body, 'max_tokens');
-  return typeof limit === 'number' ? limit : undefined;
-}
-
 /** Parses the MIME type from a data URI (`data:<mime>;base64,...`). */
 export function parseMimeFromDataUri(uri: string): string | undefined {
   const match = /^data:([^;,]+)/.exec(uri);
@@ -1019,10 +1013,10 @@ export function describeStreamError(raw: unknown): string {
 }
 
 export function toStreamError(raw: unknown): Error {
-  if (raw instanceof Error) {
+  if (raw instanceof ModelProviderError) {
     return raw;
   }
-  return new Error(describeStreamError(raw), { cause: raw });
+  return new ModelProviderError(describeStreamError(raw), { cause: raw });
 }
 
 export function mapFinishReason(reason: FinishReason): RawAssistantMessageWithUsage['finish_reason'] {
@@ -1384,13 +1378,8 @@ export async function* mapStreamToChunks({
 // VercelAILLM
 // ---------------------------------------------------------------------------
 
-/** True when undici idle-between-chunks bodyTimeout fired (nested under fetch failures). */
-export function isBodyTimeoutError(error: unknown): boolean {
-  return extractErrorLogFields(error).error.includes('Body Timeout');
-}
-
-/** Fields for Body Timeout logs: gateway correlation id plus model and URL when known. */
-export function bodyTimeoutLogFields(input: {
+/** Error log fields with gateway correlation id plus model and URL when known. */
+export function llmErrorLogFields(input: {
   error: unknown;
   tfyRequestId: string;
   model: string;
@@ -1420,7 +1409,7 @@ export class VercelAILLM implements ILLM {
   async *create(
     body: LLMCreateParamsStreaming,
   ): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
-    // Per-call id on x-tfy-request-id so Body Timeout (and gateway traces) can be correlated.
+    // Per-call id on x-tfy-request-id so harness error logs can be correlated with gateway traces.
     const tfyRequestId = randomUUID();
     const providerConfig: VercelAIProviderConfig = {
       ...this.config.providerConfig,
@@ -1482,22 +1471,21 @@ export class VercelAILLM implements ILLM {
         ...(output !== undefined ? { output } : {}),
       });
     } catch (error) {
+      const streamError = toStreamError(error);
       if (this.signal?.aborted) {
-        this.logger.debug('LLM call aborted', extractErrorLogFields(error));
-      } else if (isBodyTimeoutError(error)) {
+        this.logger.debug('LLM call aborted', extractErrorLogFields(streamError));
+      } else {
         this.logger.error(
-          'LLM Body Timeout',
-          bodyTimeoutLogFields({
-            error,
+          'Error creating streaming chat completion',
+          llmErrorLogFields({
+            error: streamError,
             tfyRequestId,
             model: providerConfig.name,
             gatewayUrl: providerConfig.baseUrl,
           }),
         );
-      } else {
-        this.logger.error('Error creating streaming chat completion', extractErrorLogFields(error));
       }
-      throw toStreamError(error);
+      throw streamError;
     }
 
     // Detached: warnings resolve at stream start, and a pending or rejected promise must never
@@ -1530,22 +1518,21 @@ export class VercelAILLM implements ILLM {
       result.output.source = `${provider.type}/${provider.name}/${model.name}`;
       return result;
     } catch (error) {
+      const streamError = toStreamError(error);
       if (this.signal?.aborted) {
-        this.logger.debug('LLM stream aborted', extractErrorLogFields(error));
-      } else if (isBodyTimeoutError(error)) {
+        this.logger.debug('LLM stream aborted', extractErrorLogFields(streamError));
+      } else {
         this.logger.error(
-          'LLM Body Timeout',
-          bodyTimeoutLogFields({
-            error,
+          'Error reading LLM stream',
+          llmErrorLogFields({
+            error: streamError,
             tfyRequestId,
             model: providerConfig.name,
             gatewayUrl: providerConfig.baseUrl,
           }),
         );
-      } else {
-        this.logger.error('Error reading LLM stream', extractErrorLogFields(error));
       }
-      throw toStreamError(error);
+      throw streamError;
     }
   }
 

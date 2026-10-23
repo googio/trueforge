@@ -1,5 +1,6 @@
 import {
   getErrorMessage,
+  resolveReasoningEffort,
   ThemeProvider,
   TrueForgeUI,
   useTheme,
@@ -143,9 +144,7 @@ export function App() {
           });
           return;
         }
-        const reasoningEfforts = first.properties.reasoningEfforts;
-        // Default to the lowest real effort, not "none" — catalog lists are ordered ascending.
-        const defaultReasoningEffort = reasoningEfforts?.find(effort => effort !== 'none') ?? reasoningEfforts?.[0];
+        const defaultReasoningEffort = resolveReasoningEffort(first.properties.reasoningEfforts, undefined);
         setBoot({
           status: 'ready',
           openSettings: false,
