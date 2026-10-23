@@ -29,7 +29,6 @@ import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import type { Logger } from 'winston';
 import { z } from 'zod';
-import type { ResolveSkillStoreInput } from '../app';
 import type { Authorizer } from '../auth/authorizer';
 import { createdBySubjectFromRequestContext, type RequestContext, type ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
@@ -85,50 +84,51 @@ export function toWireSession(record: SessionRecord): Session {
 }
 
 export interface SessionsRouterDeps {
+  activeTurns: ActiveTurnRegistry;
+  authorizer: Authorizer;
+  logger: Logger;
+  /**
+   * Publishes to another executor:
+   *  - Creating the next turn -> redis request `sessions/cancel`
+   * when the previous run is not in this process.
+   * Unset in standalone.
+   */
+  redis?: RedisClient | undefined;
+  /**
+   * Used to register routes
+   * - `sessions/cancel` -> {@link cancelSessionTurnPeerHandler}
+   */
+  requestReplyRouter: RequestReplyRouter;
+  resolveAgentStore: (c: Context) => IAgentStore;
+  resolveMcpServerStore: (input: { c: Context; allowInlineResources?: boolean }) => IMcpServerStore;
+  resolveModelProviderStore: (input: { c: Context; allowInlineResources?: boolean }) => IModelProviderStore;
+  resolveRequestContext: ResolveRequestContext;
+  resolveSkillStore: (input: { c: Context; allowInlineResources?: boolean }) => ISkillStore;
+  sandboxEnvironmentStore: ISandboxEnvironmentStore;
+  sandboxProviderStore: ISandboxProviderStore;
   sessions: Sessions;
   sessionStore: ISessionStore;
-  activeTurns: ActiveTurnRegistry;
-  resolveModelProviderStore: (input: { c: Context; allowInlineResources?: boolean }) => IModelProviderStore;
-  resolveMcpServerStore: (input: { c: Context; allowInlineResources?: boolean }) => IMcpServerStore;
-  resolveSkillStore: (input: ResolveSkillStoreInput) => ISkillStore;
-  resolveAgentStore: (c: Context) => IAgentStore;
-  resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore;
-  sandboxEnvironmentStore: ISandboxEnvironmentStore;
-  redis?: RedisClient | undefined;
-  resolveWebSearchProviderStore: (c: Context) => IWebSearchProviderStore;
-  requestReplyRouter: RequestReplyRouter;
-  resolveRequestContext: ResolveRequestContext;
-  logger: Logger;
-  authorizer: Authorizer;
-}
-
-function cancelTurnOnThisExecutor(
-  activeTurns: ActiveTurnRegistry,
-  input: { sessionId: string; turnId: string; reason: CancellationReason },
-): boolean {
-  return activeTurns.cancelIfRunning({
-    sessionId: input.sessionId,
-    turnId: input.turnId,
-    abortReason: input.reason,
-  });
+  webSearchProviderStore: IWebSearchProviderStore;
 }
 
 /**
- * Peer-facing cancel handler: aborts the turn if it runs in this process.
- * 200 = abort fired, 412 = not running here (treated by callers as a no-op).
+ * Peer-facing cancel handler. 200 means this process found the run and signaled abort.
+ * The drain writes `turn.done` afterward. 412 means it is not running here.
  */
 export function cancelSessionTurnPeerHandler(activeTurns: ActiveTurnRegistry): RequestReplyRouteHandler {
-  // Synchronous by nature; the transport expects a Promise and require-await
-  // forbids an async fn without awaits.
   return request => {
     const parsed = CancelPeerBodySchema.safeParse(request.body);
     if (!parsed.success) {
       return Promise.resolve({ status: 400, body: { message: 'Invalid sessions/cancel payload' } });
     }
-    const found = cancelTurnOnThisExecutor(activeTurns, {
+    // Note that we do not wait for the abort to complete.
+    // This means a turn.done can arrive delayed till any in progress step is completed
+    // if they do not honor the abort signal.
+    // This is intentional.
+    const found = activeTurns.cancelIfRunning({
       sessionId: parsed.data.session_id,
       turnId: parsed.data.turn_id,
-      reason: parsed.data.reason,
+      abortReason: parsed.data.reason,
     });
     if (!found) {
       return Promise.resolve({ status: 412, body: { message: 'Turn is not running on this executor' } });
@@ -151,9 +151,9 @@ export interface CancelTurnDeps {
  * owning peer over Redis request-reply. Callers state the motive; default is a
  * plain client cancel.
  *
- * A confirmed abort (this process, or peer HTTP 200) lets TurnHandle persist
- * the terminal state. If abort cannot be confirmed, this replica freezes the
- * turn in the store so the session is not stuck `running` or `paused`.
+ * A found run (this process, or peer HTTP 200) is aborted and not frozen. The drain
+ * writes the terminal state afterward. A stuck call can leave the row non-terminal.
+ * If the run was not found, this replica freezes the turn in the store.
  *
  * Redis timeout and Redis/transport failures are not a clean cancellation —
  * the owning replica may still be executing — but the turn is still frozen.
@@ -198,6 +198,7 @@ export async function cancelSessionTurn(
       }
     } catch (error) {
       const fields = {
+        session_id: sessionId,
         turn_id: turnId,
         owner,
         ...extractErrorLogFields(error),
@@ -212,7 +213,11 @@ export async function cancelSessionTurn(
     return;
   }
 
-  const aborted = cancelTurnOnThisExecutor(deps.activeTurns, { sessionId, turnId, reason });
+  const aborted = deps.activeTurns.cancelIfRunning({
+    sessionId,
+    turnId,
+    abortReason: reason,
+  });
   if (!aborted) {
     await freezeTurnIgnoringMissing(deps.session, { turnId, reason });
   }
@@ -252,12 +257,12 @@ function isSessionOwner({
 function validateInlineSessionSpec(
   deps: Pick<
     SessionsRouterDeps,
-    | 'resolveModelProviderStore'
     | 'resolveMcpServerStore'
+    | 'resolveModelProviderStore'
     | 'resolveSkillStore'
-    | 'resolveSandboxProviderStore'
     | 'sandboxEnvironmentStore'
-    | 'resolveWebSearchProviderStore'
+    | 'sandboxProviderStore'
+    | 'webSearchProviderStore'
   >,
   input: { c: Context; spec: AgentSpec; requestContext: RequestContext },
 ): Promise<void> {
@@ -269,24 +274,24 @@ function validateInlineSessionSpec(
     modelProviderStore: deps.resolveModelProviderStore({ c, allowInlineResources: true }),
     mcpServerStore: deps.resolveMcpServerStore({ c, allowInlineResources: true }),
     skillStore: deps.resolveSkillStore({ c, allowInlineResources: true }),
-    sandboxProviderStore: deps.resolveSandboxProviderStore(c),
+    sandboxProviderStore: deps.sandboxProviderStore,
     sandboxEnvironmentStore: deps.sandboxEnvironmentStore,
-    webSearchProviderStore: deps.resolveWebSearchProviderStore(c),
+    webSearchProviderStore: deps.webSearchProviderStore,
   });
 }
 
 type InternalSessionsRouterDeps = Pick<
   SessionsRouterDeps,
-  | 'sessions'
-  | 'resolveModelProviderStore'
-  | 'resolveMcpServerStore'
-  | 'resolveSkillStore'
-  | 'resolveAgentStore'
-  | 'resolveSandboxProviderStore'
-  | 'sandboxEnvironmentStore'
-  | 'resolveWebSearchProviderStore'
-  | 'resolveRequestContext'
   | 'authorizer'
+  | 'resolveAgentStore'
+  | 'resolveMcpServerStore'
+  | 'resolveModelProviderStore'
+  | 'resolveRequestContext'
+  | 'resolveSkillStore'
+  | 'sandboxEnvironmentStore'
+  | 'sandboxProviderStore'
+  | 'sessions'
+  | 'webSearchProviderStore'
 >;
 
 function createGetOrCreateSessionByExternalIdHandler(
@@ -502,9 +507,9 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
           modelProviderStore: deps.resolveModelProviderStore({ c }),
           mcpServerStore: deps.resolveMcpServerStore({ c }),
           skillStore: deps.resolveSkillStore({ c }),
-          sandboxProviderStore: deps.resolveSandboxProviderStore(c),
+          sandboxProviderStore: deps.sandboxProviderStore,
           sandboxEnvironmentStore: deps.sandboxEnvironmentStore,
-          webSearchProviderStore: deps.resolveWebSearchProviderStore(c),
+          webSearchProviderStore: deps.webSearchProviderStore,
         });
       }
     }

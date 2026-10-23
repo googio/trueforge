@@ -13,6 +13,7 @@ import {
 import { createTurnsRouter } from '../../../src/apis/turns';
 import { TrueForgeAuthorizer, type Authorizer } from '../../../src/auth/authorizer';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import configuration from '../../../src/config';
 import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
@@ -115,21 +116,21 @@ describe('sessions HTTP agent binding', () => {
     resolveMcpServerStore = jest.fn(() => mcpServerStore);
     resolveSkillStore = jest.fn(() => skillStore);
     const deps: SessionsRouterDeps = {
-      sessions,
-      sessionStore,
-      activeTurns: new ActiveTurnRegistry(),
-      resolveModelProviderStore,
-      resolveMcpServerStore,
-      resolveSkillStore,
-      resolveAgentStore: () => agentStore,
-      resolveSandboxProviderStore: () => sandboxProviderStore,
-      sandboxEnvironmentStore,
-      resolveWebSearchProviderStore: () => webSearchProviderStore,
+      activeTurns: new ActiveTurnRegistry({ logger: createLogger({ silent: true }) }),
+      authorizer: new TrueForgeAuthorizer(),
+      logger: createLogger({ silent: true }),
       redis: createClient(),
       requestReplyRouter: new RequestReplyRouter(),
+      resolveAgentStore: () => agentStore,
+      resolveMcpServerStore,
+      resolveModelProviderStore,
       resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
-      logger: createLogger({ silent: true }),
-      authorizer: new TrueForgeAuthorizer(),
+      resolveSkillStore,
+      sandboxEnvironmentStore,
+      sandboxProviderStore,
+      sessions,
+      sessionStore,
+      webSearchProviderStore,
     };
     sessionDeps = deps;
     app = new OpenAPIHono();
@@ -138,25 +139,30 @@ describe('sessions HTTP agent binding', () => {
     app.route(
       '/',
       createTurnsRouter({
+        activeTurns: deps.activeTurns,
+        authorizer: deps.authorizer,
+        eventSubscriptions: new EventSubscriptionRegistry(undefined),
+        logger: deps.logger,
+        requestReplyRouter: deps.requestReplyRouter,
+        resolveAgentStore: () => agentStore,
+        resolveRequestContext: deps.resolveRequestContext,
+        resolveTurnExecutionStores: () =>
+          Promise.resolve({
+            agentStore,
+            modelProviderStore,
+            mcpServerStore: new McpServerWithAuthStore({
+              store: mcpServerStore,
+              tokenStore,
+              clientName: 'test-client',
+            }),
+            skillStore,
+            sandboxProviderStore,
+            webSearchProviderStore,
+          }),
+        sandboxEnvironmentStore,
+        sandboxProviderStore,
         sessions,
         sessionStore,
-        activeTurns: deps.activeTurns,
-        resolveModelProviderStore: () => modelProviderStore,
-        resolveMcpServerStore: () =>
-          new McpServerWithAuthStore({
-            store: mcpServerStore,
-            tokenStore,
-            clientName: 'test-client',
-          }),
-        resolveTurnSkillsStore: () => skillStore,
-        resolveAgentStore: () => agentStore,
-        eventSubscriptions: new EventSubscriptionRegistry(undefined),
-        resolveSandboxProviderStore: () => sandboxProviderStore,
-        sandboxEnvironmentStore,
-        resolveWebSearchProviderStore: () => webSearchProviderStore,
-        logger: deps.logger,
-        resolveRequestContext: deps.resolveRequestContext,
-        authorizer: deps.authorizer,
       }),
     );
     app.route('/api/internal/sessions', createInternalSessionsRouter(deps));
@@ -486,11 +492,17 @@ describe('sessions HTTP agent binding', () => {
     const created = await app.request('/', jsonInit('POST', { agent: { spec: inlineSpec } }));
     expect(created.status).toBe(201);
     const { data: session } = (await created.json()) as { data: { id: string } };
-    await sessionStore.createTurn(makeCreateTurnInput({ sessionId: session.id, turnId: 'tip-1' }));
+    await sessionStore.createTurn(
+      makeCreateTurnInput({ sessionId: session.id, turnId: 'tip-1', activeExecutorId: configuration.EXECUTOR_ID }),
+    );
     const send = jest.fn().mockImplementation(async function* (events: Parameters<TurnHandle['send']>[0]) {
       yield events;
     });
-    jest.spyOn(sessionDeps.activeTurns, 'getTurnHandle').mockReturnValue({ send } as unknown as TurnHandle);
+    jest.spyOn(sessionDeps.activeTurns, 'getTurnHandle').mockReturnValue({
+      send,
+      state: { status: 'running' },
+      record: { active_executor_id: configuration.EXECUTOR_ID },
+    } as unknown as TurnHandle);
 
     const res = await app.request(
       `/${session.id}/turns/tip-1/events`,
@@ -559,7 +571,9 @@ describe('sessions HTTP agent binding', () => {
     const created = await app.request('/', jsonInit('POST', { agent: { spec: inlineSpec } }));
     expect(created.status).toBe(201);
     const { data: session } = (await created.json()) as { data: { id: string } };
-    await sessionStore.createTurn(makeCreateTurnInput({ sessionId: session.id, turnId: 'tip-1' }));
+    await sessionStore.createTurn(
+      makeCreateTurnInput({ sessionId: session.id, turnId: 'tip-1', activeExecutorId: configuration.EXECUTOR_ID }),
+    );
 
     const registry = sessionDeps.activeTurns;
     const gate = Promise.withResolvers<undefined>();
