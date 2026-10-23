@@ -285,6 +285,11 @@ export async function listSessions(
       query = query.where(sql<boolean>`metadata = '{}'::jsonb`);
     } else {
       query = query.where(sql<boolean>`metadata @> ${json(input.metadata)}`);
+      // Values are strings, so these repeat the containment check; they let the planner use
+      // per-key expression indexes (`metadata->>'key'`), which `@>` alone cannot.
+      for (const [key, value] of Object.entries(input.metadata)) {
+        query = query.where(sql<string>`metadata->>${key}::text`, '=', value);
+      }
     }
   }
   if (input.source_type !== undefined) {
