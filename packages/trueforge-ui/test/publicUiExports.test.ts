@@ -189,6 +189,7 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'readSessionIsCreateAgent',
   'resolveBrandChrome',
   'resolvePresetTokens',
+  'resolveReasoningEffort',
   'sessionIsCreateAgent',
   'shellIsCreateAgent',
   'shellIsMutable',

@@ -1338,7 +1338,7 @@ function stripInteractivePendingFromAssistant(
   return {
     ...message,
     content,
-    status: { type: 'incomplete', reason: 'cancelled' },
+    status: { type: 'complete', reason: 'stop' },
     metadata: {
       ...message.metadata,
       custom,

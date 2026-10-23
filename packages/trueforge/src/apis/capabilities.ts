@@ -1,6 +1,6 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
 import type { Logger } from 'winston';
-import { hasAdminRole, type ResolveRequestContext } from '../auth/identity';
+import { canAccessSettings, type ResolveRequestContext } from '../auth/identity';
 import type { ISandboxEnvironmentStore } from '../db/sandboxEnvironmentStore';
 import type { WithTransaction } from '../db/transaction';
 import type { IWebSearchProviderStore } from '../db/webSearchProviderStore';
@@ -42,7 +42,7 @@ export function createCapabilitiesRouter<TTransaction>(deps: {
       hasTrueFoundrySandboxProviderConfig() ||
       status === 'ready' ||
       (defaultEnv === undefined && isLocalSandboxFallbackEnabled());
-    const settingsEnabled = hasAdminRole(requestContext);
+    const settingsEnabled = canAccessSettings(requestContext);
     const webSearchEnabled = await hasConfiguredWebSearchProvider({
       tenant_id: requestContext.tenant_id,
       store: deps.webSearchProviderStore,

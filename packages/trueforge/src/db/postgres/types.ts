@@ -7,6 +7,7 @@ import type {
   CreatedBySubject,
   LegacyTurnInputItem,
   PersistedTurnEvent,
+  SessionLastTurnDetails,
   SessionMetadata,
   SessionMetrics,
   SessionSource,
@@ -97,6 +98,12 @@ export interface SessionTable {
    *      tiny fixed-width column keeps the bump a cheap HOT update
    */
   last_turn_id: string | null;
+  /** Null until the first turn; always replaced as a whole document. */
+  last_turn_details: JSONColumnType<
+    SessionLastTurnDetails,
+    SessionLastTurnDetails | null,
+    SessionLastTurnDetails | null
+  > | null;
   /**
    * Optional unique key within `tenant_id` (`session_external_id_uq`,
    * partial WHERE external_id IS NOT NULL).
