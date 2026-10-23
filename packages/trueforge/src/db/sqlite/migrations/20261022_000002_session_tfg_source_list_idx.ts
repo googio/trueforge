@@ -12,9 +12,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
         ON session (
           tenant_id,
           json_extract(created_by_subject, '$.subject_id'),
-          json_extract(metadata, '$."tfg.source"'),
           updated_at,
-          session_id
+          session_id,
+          json_extract(metadata, '$."tfg.source"')
         )
     `.execute(trx);
   });
