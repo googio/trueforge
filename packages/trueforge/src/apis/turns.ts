@@ -146,8 +146,8 @@ export function toContentDisposition(path: string): string {
  * Model, MCP, skill, agent, sandbox, and web-search stores for one turn.
  * HTTP passes the request's context and headers. A peered `turns/send-events` passes the body fields.
  */
-export interface ResolveTurnExecutionStoresInput {
-  session: SessionHandle;
+export interface ResolveTurnExecutionStoresInput<TTransaction = never> {
+  session: SessionHandle<TTransaction>;
   requestContext: RequestContext;
   requestHeaders?: Record<string, string> | undefined;
   /** Saved agent when the session references one. The caller loads it. */
@@ -163,8 +163,8 @@ export interface TurnExecutionStores<TTransaction = never> {
   webSearchProviderStore: IWebSearchProviderStore<TTransaction>;
 }
 
-export interface TurnsRouterDeps {
-  activeTurns: ActiveTurnRegistry;
+export interface TurnsRouterDeps<TTransaction = never> {
+  activeTurns: ActiveTurnRegistry<TTransaction>;
   authorizer: Authorizer;
   /** Resumable live turn-event transport: create-turn writes, subscribe polls. */
   eventSubscriptions: EventSubscriptionRegistry<TurnStreamingEvent>;
@@ -190,13 +190,15 @@ export interface TurnsRouterDeps {
    * Create, POST /events, and a peered `turns/send-events` all call this with the caller's
    * request context and headers.
    */
-  resolveTurnExecutionStores: (input: ResolveTurnExecutionStoresInput) => Promise<TurnExecutionStores>;
+  resolveTurnExecutionStores: (
+    input: ResolveTurnExecutionStoresInput<TTransaction>,
+  ) => Promise<TurnExecutionStores<TTransaction>>;
   /** Create, POST /events, and peered send-events, via the turn execution deps. */
   sandboxEnvironmentStore: ISandboxEnvironmentStore;
   /** Sandbox file download. */
   sandboxProviderStore: ISandboxProviderStore;
-  sessions: Sessions;
-  sessionStore: ISessionStore;
+  sessions: Sessions<TTransaction>;
+  sessionStore: ISessionStore<TTransaction>;
 }
 
 /**
@@ -204,8 +206,8 @@ export interface TurnsRouterDeps {
  * stores; callers must resolve them from the request context (e.g. schedule `resolveTurnDeps(c, agent)`)
  * so TrueFoundry mode stays token-bound for models, MCP, and skills.
  */
-export type BeginTurnExecutionDeps = Pick<
-  TurnsRouterDeps,
+export type BeginTurnExecutionDeps<TTransaction> = Pick<
+  TurnsRouterDeps<TTransaction>,
   'activeTurns' | 'eventSubscriptions' | 'logger' | 'sandboxEnvironmentStore'
 > & {
   agentStore: IAgentStore;
@@ -219,8 +221,8 @@ export type BeginTurnExecutionDeps = Pick<
   redis?: RedisClient | undefined;
 };
 
-async function referencedRunAsAgent(input: {
-  session: SessionHandle;
+async function referencedRunAsAgent<TTransaction>(input: {
+  session: SessionHandle<TTransaction>;
   agentStore: IAgentStore;
 }): Promise<AgentRecord | undefined> {
   if (input.session.record.agent.type !== 'reference') {
@@ -232,13 +234,13 @@ async function referencedRunAsAgent(input: {
   });
 }
 
-async function executionDepsForCaller(input: {
-  deps: TurnsRouterDeps;
-  session: SessionHandle;
+async function executionDepsForCaller<TTransaction>(input: {
+  deps: TurnsRouterDeps<TTransaction>;
+  session: SessionHandle<TTransaction>;
   requestContext: RequestContext;
   requestHeaders?: Record<string, string> | undefined;
   runAsAgent?: AgentRecord;
-}): Promise<BeginTurnExecutionDeps> {
+}): Promise<BeginTurnExecutionDeps<TTransaction>> {
   const stores = await input.deps.resolveTurnExecutionStores(input);
   return {
     activeTurns: input.deps.activeTurns,
@@ -251,14 +253,14 @@ async function executionDepsForCaller(input: {
   };
 }
 
-interface BeginTurnExecutionParams {
-  session: SessionHandle;
+interface BeginTurnExecutionParams<TTransaction> {
+  session: SessionHandle<TTransaction>;
   input: UserMessage[] | undefined;
   previous_turn_id: string | undefined;
   userRef: string;
   /** Raw inbound request headers. Absent for a schedule run. */
   requestHeaders?: Record<string, string>;
-  deps: BeginTurnExecutionDeps;
+  deps: BeginTurnExecutionDeps<TTransaction>;
 }
 
 /**
@@ -276,7 +278,7 @@ function createTurnResolver(deps: {
   logger: Logger;
   signal: AbortSignal;
   userRef: string;
-  session: SessionHandle;
+  session: Pick<SessionHandle, 'tenant_id' | 'session_id'>;
   turnMetadata: TurnMetadata;
 }): TurnResourceResolver {
   const {
@@ -547,12 +549,12 @@ export interface TurnEventDrainInput {
  * Header check, abort, execution timeout, web search, and the per-turn resolver.
  * Create and resume each keep their own persist and drain steps.
  */
-async function prepareTurnExecution(input: {
-  session: SessionHandle;
+async function prepareTurnExecution<TTransaction>(input: {
+  session: SessionHandle<TTransaction>;
   turnId: string;
   userRef: string;
   requestHeaders: Record<string, string> | undefined;
-  deps: BeginTurnExecutionDeps;
+  deps: BeginTurnExecutionDeps<TTransaction>;
 }): Promise<{
   abortController: AbortController;
   resolver: TurnResourceResolver;
@@ -617,9 +619,9 @@ async function prepareTurnExecution(input: {
  * Shared create-turn engine: persist the turn, start execution, and return the
  * drain inputs. Does not wait for events and does not write HTTP/SSE.
  */
-export async function beginTurnExecution(
-  params: BeginTurnExecutionParams,
-): Promise<{ turn: TurnHandle; drainInput: TurnEventDrainInput }> {
+export async function beginTurnExecution<TTransaction>(
+  params: BeginTurnExecutionParams<TTransaction>,
+): Promise<{ turn: TurnHandle<TTransaction>; drainInput: TurnEventDrainInput }> {
   const { session, input, previous_turn_id: previousTurnId, userRef, requestHeaders, deps } = params;
   const sessionId = session.session_id;
   const turnId = newId();
@@ -689,7 +691,9 @@ export async function beginTurnExecution(
  * Non-stream create-turn: begin execution and resolve once the first event is
  * dual-written so immediate subscribe cannot 412. Same as `stream: false`.
  */
-export async function startTurnInProcess(params: BeginTurnExecutionParams): Promise<TurnHandle> {
+export async function startTurnInProcess<TTransaction>(
+  params: BeginTurnExecutionParams<TTransaction>,
+): Promise<TurnHandle<TTransaction>> {
   const { turn, drainInput } = await beginTurnExecution(params);
 
   // Same unawaited drain scheduling as Hono streamSSE's run(cb).
@@ -723,13 +727,13 @@ function cancellationReason(reason: unknown): CancellationReason {
  * Rebuild a paused turn this replica owns, reseed the event-stream counter from
  * the existing tail, and drain in the background. Inbox replay happens inside rebuild.
  */
-async function resumePausedTurn(input: {
-  session: SessionHandle;
+async function resumePausedTurn<TTransaction>(input: {
+  session: SessionHandle<TTransaction>;
   turnId: string;
   requestContext: RequestContext;
   requestHeaders?: Record<string, string> | undefined;
-  deps: BeginTurnExecutionDeps;
-}): Promise<{ turn: TurnHandle; signal: AbortSignal; startDrain: () => void }> {
+  deps: BeginTurnExecutionDeps<TTransaction>;
+}): Promise<{ turn: TurnHandle<TTransaction>; signal: AbortSignal; startDrain: () => void }> {
   // Same chain as create: model, MCP, sandbox, and the detached drain keep these ids.
   updateLogContext({
     tenant_id: input.session.tenant_id,
@@ -751,7 +755,7 @@ async function resumePausedTurn(input: {
     abortController,
   });
 
-  let turn: TurnHandle;
+  let turn: TurnHandle<TTransaction>;
   try {
     turn = await input.session.rebuildTurn({
       turn_id: input.turnId,
@@ -970,10 +974,10 @@ export enum TurnOwnershipAction {
 }
 
 /** Send a batch to the live handle and persist each yielded inbox batch. */
-async function applyTurnEvents(input: {
-  handle: TurnHandle;
+async function applyTurnEvents<TTransaction>(input: {
+  handle: TurnHandle<TTransaction>;
   events: TurnUserEvent[];
-  sessionStore: Pick<ISessionStore, 'insertTurnInboundEvents'>;
+  sessionStore: Pick<ISessionStore<TTransaction>, 'insertTurnInboundEvents'>;
   sessionId: string;
   turnId: string;
 }): Promise<SendEventsResult> {
@@ -1004,14 +1008,14 @@ async function applyTurnEvents(input: {
  * If the row is claimed away before the batch is applied, return `'retry'`.
  * The peered send turns that into 412. A peered request does not steal.
  */
-async function rebuildOptionallyAndRun(input: {
-  session: SessionHandle;
+async function rebuildOptionallyAndRun<TTransaction>(input: {
+  session: SessionHandle<TTransaction>;
   turn: TurnRecord;
   events: TurnUserEvent[];
-  sessionStore: Pick<ISessionStore, 'insertTurnInboundEvents'>;
+  sessionStore: Pick<ISessionStore<TTransaction>, 'insertTurnInboundEvents'>;
   requestContext: RequestContext;
   requestHeaders: Record<string, string> | undefined;
-  deps: BeginTurnExecutionDeps;
+  deps: BeginTurnExecutionDeps<TTransaction>;
 }): Promise<SendEventsResult | 'retry'> {
   const sessionId = input.session.session_id;
   const turnId = input.turn.turn_id;
@@ -1259,7 +1263,10 @@ async function forwardTurnEvents(input: {
   }
 }
 
-async function handleParsedPeerTurnEvents(deps: TurnsRouterDeps, body: z.infer<typeof SendEventsPeerBodySchema>) {
+async function handleParsedPeerTurnEvents<TTransaction>(
+  deps: TurnsRouterDeps<TTransaction>,
+  body: z.infer<typeof SendEventsPeerBodySchema>,
+) {
   const session = await deps.sessions.get({
     tenant_id: body.tenant_id,
     session_id: body.session_id,
@@ -1331,7 +1338,7 @@ async function handleParsedPeerTurnEvents(deps: TurnsRouterDeps, body: z.infer<t
   }
 }
 
-function handlePeerTurnEvents(deps: TurnsRouterDeps): RequestReplyRouteHandler {
+function handlePeerTurnEvents<TTransaction>(deps: TurnsRouterDeps<TTransaction>): RequestReplyRouteHandler {
   return async request => {
     const parsed = SendEventsPeerBodySchema.safeParse(request.body);
     if (!parsed.success) {
@@ -1363,14 +1370,14 @@ function handlePeerTurnEvents(deps: TurnsRouterDeps): RequestReplyRouteHandler {
  * The batch never reached the owner: steal it when the turn is still paused under that same owner. A running turn is a conflict. Another executor means try again.
  * The owner may already have applied the batch: stop, and let the client retry.
  */
-async function sendTurnEvents(input: {
-  session: SessionHandle;
-  sessionStore: Pick<ISessionStore, 'claimTurnExecutor' | 'insertTurnInboundEvents'>;
+async function sendTurnEvents<TTransaction>(input: {
+  session: SessionHandle<TTransaction>;
+  sessionStore: Pick<ISessionStore<TTransaction>, 'claimTurnExecutor' | 'insertTurnInboundEvents'>;
   turnId: string;
   events: TurnUserEvent[];
   requestContext: RequestContext;
   requestHeaders: Record<string, string> | undefined;
-  deps: BeginTurnExecutionDeps;
+  deps: BeginTurnExecutionDeps<TTransaction>;
 }): Promise<SendEventsResult | 'retry'> {
   const sessionId = input.session.session_id;
   const turn = await input.session.getTurn(input.turnId);
@@ -1530,14 +1537,14 @@ async function sendTurnEvents(input: {
 }
 
 /** User send. Forwards to the owner and may steal a paused turn whose heartbeat is gone. */
-async function sendTurnEventsWithRetries(input: {
-  session: SessionHandle;
-  sessionStore: Pick<ISessionStore, 'claimTurnExecutor' | 'insertTurnInboundEvents'>;
+async function sendTurnEventsWithRetries<TTransaction>(input: {
+  session: SessionHandle<TTransaction>;
+  sessionStore: Pick<ISessionStore<TTransaction>, 'claimTurnExecutor' | 'insertTurnInboundEvents'>;
   turnId: string;
   events: TurnUserEvent[];
   requestContext: RequestContext;
   requestHeaders: Record<string, string> | undefined;
-  deps: BeginTurnExecutionDeps;
+  deps: BeginTurnExecutionDeps<TTransaction>;
 }): Promise<SendEventsResult> {
   for (let attempt = 0; attempt < MAX_OWNERSHIP_ATTEMPTS; attempt++) {
     const result = await sendTurnEvents(input);
@@ -1550,7 +1557,7 @@ async function sendTurnEventsWithRetries(input: {
 }
 
 /** DB-backed turns (mounted at /api/v1/sessions). */
-export function createTurnsRouter(deps: TurnsRouterDeps) {
+export function createTurnsRouter<TTransaction>(deps: TurnsRouterDeps<TTransaction>) {
   const listTurnsHandler: RouteHandler<typeof listTurnsRoute> = async c => {
     const { session_id: sessionId } = c.req.valid('param');
     const query = c.req.valid('query');
@@ -1769,7 +1776,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     }
 
     // x-tfg-skills / x-tfg-mcp / x-tfg-models on turns only when the session agent is inline.
-    const turnParams: BeginTurnExecutionParams = {
+    const turnParams: BeginTurnExecutionParams<TTransaction> = {
       session,
       input: body.input,
       previous_turn_id: body.previous_turn_id,

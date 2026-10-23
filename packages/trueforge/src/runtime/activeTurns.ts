@@ -21,12 +21,12 @@ interface RebuildingTurnRun extends TurnRunCompletion {
   phase: 'rebuilding';
 }
 
-interface LiveTurnRun extends TurnRunCompletion {
+interface LiveTurnRun<TTransaction> extends TurnRunCompletion {
   phase: 'live';
-  turn: TurnHandle;
+  turn: TurnHandle<TTransaction>;
 }
 
-type ActiveTurnRun = RebuildingTurnRun | LiveTurnRun;
+type ActiveTurnRun<TTransaction> = RebuildingTurnRun | LiveTurnRun<TTransaction>;
 
 function setupTurnRun(abortController: AbortController): TurnRunCompletion {
   const { promise: waitUntilCompleted, resolve } = Promise.withResolvers<undefined>();
@@ -40,7 +40,7 @@ function activeTurnKey(sessionId: string, turnId: string): string {
   return `${sessionId}:${turnId}`;
 }
 
-function isPausedRun(run: ActiveTurnRun | undefined): run is ActiveTurnRun {
+function isPausedRun<TTransaction>(run: ActiveTurnRun<TTransaction> | undefined): run is ActiveTurnRun<TTransaction> {
   if (!run) {
     return false;
   }
@@ -50,8 +50,8 @@ function isPausedRun(run: ActiveTurnRun | undefined): run is ActiveTurnRun {
   return run.turn.state.status === 'paused';
 }
 
-export class ActiveTurnRegistry {
-  private readonly runs = new Map<string, ActiveTurnRun>();
+export class ActiveTurnRegistry<TTransaction = never> {
+  private readonly runs = new Map<string, ActiveTurnRun<TTransaction>>();
   /** Per-turn mutex. Dropped once unlocked, which means no waiter is still queued. */
   private readonly turnLocks = new Map<string, Mutex>();
   // active turns keepalive timers, whenever turn is paused, we start a timer to keep the turn alive for a certain amount of time
@@ -96,10 +96,14 @@ export class ActiveTurnRegistry {
    * exits early). If shutdown has already begun, a paused turn is offloaded and
    * any other turn is aborted with the shutdown reason.
    */
-  track<T>(input: { abortController: AbortController; stream: AsyncIterable<T>; turn: TurnHandle }): AsyncGenerator<T> {
+  track<T>(input: {
+    abortController: AbortController;
+    stream: AsyncIterable<T>;
+    turn: TurnHandle<TTransaction>;
+  }): AsyncGenerator<T> {
     const key = activeTurnKey(input.turn.session_id, input.turn.id);
     const existing = this.runs.get(key);
-    let run: LiveTurnRun;
+    let run: LiveTurnRun<TTransaction>;
     if (existing) {
       // Keep the rebuilding run's completion promise. Shutdown may already be waiting on it
       // and does not re-read this map entry.
@@ -174,7 +178,7 @@ export class ActiveTurnRegistry {
    * An aborted run stays registered until its drain finishes. `isCancelled` tells a
    * send to reject instead of rebuilding over that drain.
    */
-  getTurnHandle(input: { sessionId: string; turnId: string }): TurnHandle | undefined {
+  getTurnHandle(input: { sessionId: string; turnId: string }): TurnHandle<TTransaction> | undefined {
     const run = this.runs.get(activeTurnKey(input.sessionId, input.turnId));
     if (run?.phase !== 'live') {
       return undefined;
@@ -348,7 +352,10 @@ export class ActiveTurnRegistry {
     }
   }
 
-  private async finishRun(run: ActiveTurnRun, reason: CancellationReason | typeof TurnOffloadReason): Promise<void> {
+  private async finishRun(
+    run: ActiveTurnRun<TTransaction>,
+    reason: CancellationReason | typeof TurnOffloadReason,
+  ): Promise<void> {
     if (!run.abortController.signal.aborted) {
       run.abortController.abort(reason);
     }

@@ -223,7 +223,7 @@ export function createRequestStoreResolvers<TTransaction>(input: {
   resolveModelProviderStore: (modelInput: ResolveModelProviderStoreInput) => IModelProviderStore<TTransaction>;
   resolveSkillStore: (skillInput: ResolveSkillStoreInput) => ISkillStore<TTransaction>;
   resolveTurnExecutionStores: (
-    turnInput: ResolveTurnExecutionStoresInput,
+    turnInput: ResolveTurnExecutionStoresInput<TTransaction>,
   ) => Promise<TurnExecutionStores<TTransaction>>;
   resolveTurnSkillsStore: (
     skillsInput: ResolveTurnSkillsStoreInput,
@@ -356,7 +356,7 @@ export function createRequestStoreResolvers<TTransaction>(input: {
       ...(allowInlineResources !== undefined ? { allowInlineResources } : {}),
     });
   };
-  const resolveTurnExecutionStores = (turnInput: ResolveTurnExecutionStoresInput) => {
+  const resolveTurnExecutionStores = (turnInput: ResolveTurnExecutionStoresInput<TTransaction>) => {
     const { runAsAgent } = turnInput;
     const allowInlineResources = turnInput.session.record.agent.type === 'inline';
     return Promise.resolve({

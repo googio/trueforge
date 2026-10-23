@@ -158,7 +158,7 @@ interface ServerPersistence<TTransaction> {
   /** One shared client for TrueFoundry store resolvers + auth; undefined when TrueFoundry mode is off. */
   serviceFoundryClient: TrueFoundryServiceFoundryServerClient | undefined;
   sessionMetricsStore: ISessionMetricsStore;
-  sessionStore: ISessionStore;
+  sessionStore: ISessionStore<TTransaction>;
   tokenStore: IOAuthTokenStore<TTransaction>;
   webSearchProviderStore: IWebSearchProviderStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
@@ -483,7 +483,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     withTransaction,
   } = persistence;
 
-  const activeTurns = new ActiveTurnRegistry({
+  const activeTurns = new ActiveTurnRegistry<TTransaction>({
     pausedKeepaliveMs: configuration.TURN_PAUSED_KEEPALIVE_SECONDS * 1000,
     logger,
   });

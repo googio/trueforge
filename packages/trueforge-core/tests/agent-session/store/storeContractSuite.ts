@@ -66,14 +66,22 @@ function contextContents(messages: ContextMessage[] | undefined): string[] {
   });
 }
 
-/** Store contract suite — factory-injected so other backends can reuse it. */
-export function runStoreContractSuite(createStore: () => ISessionStore) {
+/**
+ * Store contract suite — factory-injected so other backends can reuse it.
+ * `transactions` covers grouped commit and rollback. InMemorySessionStore does not
+ * roll back, so only database backends opt in.
+ */
+export function runStoreContractSuite<TTransaction>(
+  createStore: () => ISessionStore<TTransaction>,
+  options?: { transactions?: boolean },
+) {
+  type Store = ISessionStore<TTransaction>;
   const tenant = 't1';
   const sessionId = 's1';
   const missingSessionId = 'missing-session';
   const missingTurnId = 'missing-turn';
 
-  async function finishTurn(store: ISessionStore, turnId: string) {
+  async function finishTurn(store: Store, turnId: string) {
     const state = makeDoneTurnState();
     await store.updateTurnTerminalState({
       active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
@@ -84,7 +92,7 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
     });
   }
 
-  async function seedSession(store: ISessionStore, agentSpec = makeAgentSpec()) {
+  async function seedSession(store: Store, agentSpec = makeAgentSpec()) {
     await store.createSession({
       tenant_id: tenant,
       session_id: sessionId,
@@ -97,10 +105,7 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
     });
   }
 
-  function turnScopedWrites(
-    store: ISessionStore,
-    keys: { session_id: string; turn_id: string },
-  ): (() => Promise<unknown>)[] {
+  function turnScopedWrites(store: Store, keys: { session_id: string; turn_id: string }): (() => Promise<unknown>)[] {
     const doneState = makeDoneTurnState();
     return [
       () =>
@@ -946,7 +951,7 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
   });
 
   describe('listSessions', () => {
-    async function seedThreeSessions(store: ISessionStore) {
+    async function seedThreeSessions(store: Store) {
       for (const id of ['sa', 'sb', 'sc']) {
         await store.createSession({
           tenant_id: tenant,
@@ -1420,12 +1425,13 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
   });
 
   describe('last_turn_details', () => {
-    async function lastTurnDetails(store: ISessionStore) {
+    async function lastTurnDetails(store: Store) {
       return mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId })).last_turn_details;
     }
 
-    async function setNonTerminalState(store: ISessionStore, turnId: string, state: NonTerminalTurnState) {
+    async function setNonTerminalState(store: Store, turnId: string, state: NonTerminalTurnState) {
       await store.updateTurnNonTerminalState({
+        active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
         session_id: sessionId,
         turn_id: turnId,
         state,
@@ -1433,7 +1439,7 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
       });
     }
 
-    async function freezeTurn(store: ISessionStore, turnId: string) {
+    async function freezeTurn(store: Store, turnId: string) {
       await store.freezeAndGetTurn({
         session_id: sessionId,
         turn_id: turnId,
@@ -1513,6 +1519,7 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
         metrics: { total_cost_in_usd: 1.25 },
       };
       await store.updateTurnTerminalState({
+        active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
         session_id: sessionId,
         turn_id: 'turn-1',
         state: doneState,
@@ -4074,7 +4081,7 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
   });
 
   describe('claimTurnExecutor', () => {
-    async function pauseTurn(store: ISessionStore, turnId: string) {
+    async function pauseTurn(store: Store, turnId: string) {
       const pausedState = makePausedTurnState();
       await store.updateTurnNonTerminalState({
         session_id: sessionId,
@@ -4129,7 +4136,7 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
       expect(turn.active_executor_id).toBe(TEST_ACTIVE_EXECUTOR_ID);
     });
 
-    async function stealPausedTurn(store: ISessionStore) {
+    async function stealPausedTurn(store: Store) {
       await seedSession(store);
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
       await pauseTurn(store, 'turn-1');
@@ -4142,7 +4149,7 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
       expect(won).toBe(true);
     }
 
-    const staleExecutorWrites: [string, (store: ISessionStore) => Promise<unknown>][] = [
+    const staleExecutorWrites: [string, (store: Store) => Promise<unknown>][] = [
       [
         'updateTurnNonTerminalState',
         store => {
@@ -4313,6 +4320,100 @@ export function runStoreContractSuite(createStore: () => ISessionStore) {
       expect(afterEvents).toEqual(beforeEvents);
     });
   });
+
+  if (options?.transactions) {
+    describe('withTransaction', () => {
+      const scope = {
+        session_id: sessionId,
+        turn_id: 'turn-1',
+        active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
+      };
+      const inbound = {
+        id: 'evt-grouped',
+        type: 'user.tool_approval' as const,
+        thread_id: 'main',
+        tool_call_id: 'tc-grouped',
+        approval: { status: 'allow' as const },
+        created_at: new Date().toISOString(),
+      };
+
+      async function seedGroupedTurn(store: Store) {
+        await seedSession(store);
+        await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+        await store.insertTurnInboundEvents({ ...scope, events: [inbound] });
+      }
+
+      async function applyGroupedWrite(store: Store, transaction: TTransaction) {
+        await store.appendToThreadContext(
+          {
+            ...scope,
+            thread_id: MAIN_THREAD_ID,
+            context: [userMessage('grouped')],
+            current_context_usage: null,
+            completion: null,
+          },
+          transaction,
+        );
+        await store.appendToEvents({ ...scope, events: [inbound] }, transaction);
+        await store.markTurnInboundEventsConsumed({ ...scope, event_ids: [inbound.id] }, transaction);
+      }
+
+      it('commits thread context, the event list, and inbox consumption together', async () => {
+        const store = createStore();
+        await seedGroupedTurn(store);
+
+        await store.withTransaction(async transaction => {
+          await applyGroupedWrite(store, transaction);
+        });
+
+        const turn = mustGet(await store.getTurn({ session_id: sessionId, turn_id: 'turn-1' }));
+        expect(contextContents(turn.snapshot.threads[MAIN_THREAD_ID]?.context)).toEqual(['grouped']);
+        const events = await store.listTurnEvents({
+          session_id: sessionId,
+          turn_id: 'turn-1',
+          limit: 20,
+          page_token: undefined,
+          order: 'asc',
+        });
+        expect(events.data).toContainEqual(inbound);
+        expect(await store.listUnconsumedTurnInboundEvents({ session_id: sessionId, turn_id: 'turn-1' })).toEqual([]);
+      });
+
+      it('rolls back thread context, the event list, and inbox consumption together', async () => {
+        const store = createStore();
+        await seedGroupedTurn(store);
+        const before = mustGet(await store.getTurn({ session_id: sessionId, turn_id: 'turn-1' }));
+        const beforeEvents = await store.listTurnEvents({
+          session_id: sessionId,
+          turn_id: 'turn-1',
+          limit: 20,
+          page_token: undefined,
+          order: 'asc',
+        });
+
+        await expect(
+          store.withTransaction(async transaction => {
+            await applyGroupedWrite(store, transaction);
+            throw new Error('grouped write failed');
+          }),
+        ).rejects.toThrow('grouped write failed');
+
+        const after = mustGet(await store.getTurn({ session_id: sessionId, turn_id: 'turn-1' }));
+        const afterEvents = await store.listTurnEvents({
+          session_id: sessionId,
+          turn_id: 'turn-1',
+          limit: 20,
+          page_token: undefined,
+          order: 'asc',
+        });
+        expect(after).toEqual(before);
+        expect(afterEvents).toEqual(beforeEvents);
+        expect(await store.listUnconsumedTurnInboundEvents({ session_id: sessionId, turn_id: 'turn-1' })).toEqual([
+          inbound,
+        ]);
+      });
+    });
+  }
 
   describe('no SSE surface', () => {
     it('ISessionStore has no subscribe* members', () => {

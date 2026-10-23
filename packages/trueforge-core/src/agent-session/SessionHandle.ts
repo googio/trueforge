@@ -105,13 +105,17 @@ function threadIdsForCurrentTurn(snapshot: TurnSnapshot | undefined): string[] {
 }
 
 export class SessionHandle<
+  TTransaction = never,
   TSessionCustom extends object = Record<string, never>,
   TTurnCustom extends object = Record<string, never>,
 > {
-  private readonly store: ISessionStore<TSessionCustom, TTurnCustom>;
+  private readonly store: ISessionStore<TTransaction, TSessionCustom, TTurnCustom>;
   private session: SessionRecord<TSessionCustom>;
 
-  constructor(options: { store: ISessionStore<TSessionCustom, TTurnCustom>; session: SessionRecord<TSessionCustom> }) {
+  constructor(options: {
+    store: ISessionStore<TTransaction, TSessionCustom, TTurnCustom>;
+    session: SessionRecord<TSessionCustom>;
+  }) {
     this.store = options.store;
     this.session = options.session;
   }
@@ -173,7 +177,7 @@ export class SessionHandle<
     update_session_title_if_not_exist?: string | undefined;
     /** Value = stored as-is. Fn = merge over previous turn's custom. Omitted = undefined. */
     custom?: TTurnCustom | ((previous?: TTurnCustom) => TTurnCustom) | undefined;
-  }): Promise<TurnHandle<TTurnCustom>> {
+  }): Promise<TurnHandle<TTransaction, TTurnCustom>> {
     const previousTurnId = resolvePreviousTurnId(input.previous_turn_id, this.session.last_turn_id);
     const previous = previousTurnId
       ? await this.freezeTurn({
@@ -287,7 +291,7 @@ export class SessionHandle<
     active_executor_id: string;
     resolver: ITurnResourceResolver<TTurnCustom>;
     abortController: AbortController;
-  }): Promise<TurnHandle<TTurnCustom>> {
+  }): Promise<TurnHandle<TTransaction, TTurnCustom>> {
     try {
       const turn = await this.store.getTurn({
         session_id: this.session.session_id,

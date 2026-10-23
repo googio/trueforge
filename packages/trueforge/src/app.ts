@@ -269,7 +269,7 @@ export interface ResolveSkillStoreInput {
 }
 
 export interface ServerDeps<TTransaction> {
-  activeTurns: ActiveTurnRegistry;
+  activeTurns: ActiveTurnRegistry<TTransaction>;
   /** Persistence agent store (schedule runs resolve the bound agent without an HTTP caller). */
   agentStore: IAgentStore<TTransaction>;
   /** Startup-selected authenticator; middleware is built from this once per app. */
@@ -302,7 +302,9 @@ export interface ServerDeps<TTransaction> {
    * Stores for running a turn. HTTP create and POST /events pass the request.
    * A peered `turns/send-events` passes the forwarded context and headers.
    */
-  resolveTurnExecutionStores: (input: ResolveTurnExecutionStoresInput) => Promise<TurnExecutionStores<TTransaction>>;
+  resolveTurnExecutionStores: (
+    input: ResolveTurnExecutionStoresInput<TTransaction>,
+  ) => Promise<TurnExecutionStores<TTransaction>>;
   /**
    * Turn skill mounts. HTTP turns may apply `x-tfg-skills` when allowInlineResources is set;
    * schedules call with `{}` (registry/DB only).
@@ -315,8 +317,8 @@ export interface ServerDeps<TTransaction> {
   sandboxProviderStore: ISandboxProviderStore<TTransaction>;
   scheduleStore: IScheduleStore<TTransaction>;
   sessionMetricsStore: ISessionMetricsStore;
-  sessions: Sessions;
-  sessionStore: ISessionStore;
+  sessions: Sessions<TTransaction>;
+  sessionStore: ISessionStore<TTransaction>;
   skillCatalog: SkillCatalog;
   tokenStore: IOAuthTokenStore<TTransaction>;
   webSearchCatalog: WebSearchCatalog;

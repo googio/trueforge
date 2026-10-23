@@ -84,8 +84,8 @@ export function toWireSession(record: SessionRecord): Session {
   };
 }
 
-export interface SessionsRouterDeps {
-  activeTurns: ActiveTurnRegistry;
+export interface SessionsRouterDeps<TTransaction = never> {
+  activeTurns: ActiveTurnRegistry<TTransaction>;
   authorizer: Authorizer;
   logger: Logger;
   /**
@@ -107,8 +107,8 @@ export interface SessionsRouterDeps {
   resolveSkillStore: (input: { c: Context; allowInlineResources?: boolean }) => ISkillStore;
   sandboxEnvironmentStore: ISandboxEnvironmentStore;
   sandboxProviderStore: ISandboxProviderStore;
-  sessions: Sessions;
-  sessionStore: ISessionStore;
+  sessions: Sessions<TTransaction>;
+  sessionStore: ISessionStore<TTransaction>;
   webSearchProviderStore: IWebSearchProviderStore;
 }
 
@@ -116,7 +116,9 @@ export interface SessionsRouterDeps {
  * Peer-facing cancel handler. 200 means this process found the run and signaled abort.
  * The drain writes `turn.done` afterward. 412 means it is not running here.
  */
-export function cancelSessionTurnPeerHandler(activeTurns: ActiveTurnRegistry): RequestReplyRouteHandler {
+export function cancelSessionTurnPeerHandler<TTransaction>(
+  activeTurns: ActiveTurnRegistry<TTransaction>,
+): RequestReplyRouteHandler {
   return request => {
     const parsed = CancelPeerBodySchema.safeParse(request.body);
     if (!parsed.success) {
@@ -139,8 +141,8 @@ export function cancelSessionTurnPeerHandler(activeTurns: ActiveTurnRegistry): R
 }
 
 /** A registry to abort in, a session to freeze, durable state to read, and a way to reach peers. */
-export interface CancelTurnDeps {
-  activeTurns: ActiveTurnRegistry;
+export interface CancelTurnDeps<TTransaction = never> {
+  activeTurns: ActiveTurnRegistry<TTransaction>;
   session: Pick<SessionHandle, 'session_id' | 'freezeTurn'>;
   sessionStore: Pick<ISessionStore, 'getTurn'>;
   redis?: RedisClient | undefined;
@@ -160,8 +162,8 @@ export interface CancelTurnDeps {
  * the owning replica may still be executing — but the turn is still frozen.
  * Later writes from that replica lose to first-terminal-write-wins.
  */
-export async function cancelSessionTurn(
-  deps: CancelTurnDeps,
+export async function cancelSessionTurn<TTransaction>(
+  deps: CancelTurnDeps<TTransaction>,
   input: { turnId: string; reason?: CancellationReason },
 ): Promise<void> {
   const { turnId, reason = CancellationReason.ClientCancelled } = input;
@@ -255,9 +257,9 @@ function isSessionOwner({
  * Inline create and spec replace check model, MCP, and skill names against `x-tfg-*` when those
  * headers are present. The headers are not written onto the session.
  */
-function validateInlineSessionSpec(
+function validateInlineSessionSpec<TTransaction>(
   deps: Pick<
-    SessionsRouterDeps,
+    SessionsRouterDeps<TTransaction>,
     | 'resolveMcpServerStore'
     | 'resolveModelProviderStore'
     | 'resolveSkillStore'
@@ -281,8 +283,8 @@ function validateInlineSessionSpec(
   });
 }
 
-type InternalSessionsRouterDeps = Pick<
-  SessionsRouterDeps,
+type InternalSessionsRouterDeps<TTransaction> = Pick<
+  SessionsRouterDeps<TTransaction>,
   | 'authorizer'
   | 'resolveAgentStore'
   | 'resolveMcpServerStore'
@@ -295,8 +297,8 @@ type InternalSessionsRouterDeps = Pick<
   | 'webSearchProviderStore'
 >;
 
-function createGetOrCreateSessionByExternalIdHandler(
-  deps: InternalSessionsRouterDeps,
+function createGetOrCreateSessionByExternalIdHandler<TTransaction>(
+  deps: InternalSessionsRouterDeps<TTransaction>,
 ): RouteHandler<typeof getOrCreateSessionByExternalIdRoute> {
   return async c => {
     const body = c.req.valid('json');
@@ -368,14 +370,14 @@ function createGetOrCreateSessionByExternalIdHandler(
 }
 
 /** Internal session operations (mounted at /api/internal/sessions). */
-export function createInternalSessionsRouter(deps: InternalSessionsRouterDeps) {
+export function createInternalSessionsRouter<TTransaction>(deps: InternalSessionsRouterDeps<TTransaction>) {
   const router = new OpenAPIHono();
   router.openapi(getOrCreateSessionByExternalIdRoute, createGetOrCreateSessionByExternalIdHandler(deps));
   return router;
 }
 
 /** DB-backed sessions (mounted at /api/v1/sessions). */
-export function createSessionsRouter(deps: SessionsRouterDeps) {
+export function createSessionsRouter<TTransaction>(deps: SessionsRouterDeps<TTransaction>) {
   const createSessionHandler: RouteHandler<typeof createSessionRoute> = async c => {
     const body = c.req.valid('json');
     const sessionId = newId();

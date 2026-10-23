@@ -71,7 +71,7 @@ import { getTurnExecutionError, startTurnInProcess } from './turns';
 
 /** Runtime + Context store resolvers needed to start a schedule turn. */
 export interface ScheduleTurnExecutionDeps<TTransaction> {
-  activeTurns: ActiveTurnRegistry;
+  activeTurns: ActiveTurnRegistry<TTransaction>;
   /** Persistence agent store (schedule agent binding is not caller-scoped). */
   agentStore: IAgentStore<TTransaction>;
   eventSubscriptions: EventSubscriptionRegistry<TurnStreamingEvent>;
@@ -85,9 +85,9 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   sandboxEnvironmentStore: ISandboxEnvironmentStore<TTransaction>;
   sandboxProviderStore: ISandboxProviderStore<TTransaction>;
   scheduleStore: IScheduleStore<TTransaction>;
-  sessions: Sessions;
+  sessions: Sessions<TTransaction>;
   /** Previous-turn cancel when a schedule run supersedes a turn that is not in this process. */
-  sessionStore: Pick<ISessionStore, 'getTurn'>;
+  sessionStore: Pick<ISessionStore<TTransaction>, 'getTurn'>;
   webSearchProviderStore: IWebSearchProviderStore<TTransaction>;
 }
 

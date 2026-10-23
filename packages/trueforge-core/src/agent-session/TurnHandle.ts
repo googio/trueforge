@@ -175,8 +175,8 @@ function resolveTerminalState(input: {
   };
 }
 
-export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
-  private readonly store: ISessionStore<object, TTurnCustom>;
+export class TurnHandle<TTransaction = never, TTurnCustom extends object = Record<string, never>> {
+  private readonly store: ISessionStore<TTransaction, object, TTurnCustom>;
   private turn: TurnRecord<TTurnCustom>;
   private readonly orchestrator: AgentThreadOrchestrator;
   private readonly resolver: ITurnResourceResolver<TTurnCustom>;
@@ -184,7 +184,7 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
   private streamStarted = false;
 
   constructor(options: {
-    store: ISessionStore<object, TTurnCustom>;
+    store: ISessionStore<TTransaction, object, TTurnCustom>;
     turn: TurnRecord<TTurnCustom>;
     orchestrator: AgentThreadOrchestrator;
     resolver: ITurnResourceResolver<TTurnCustom>;
@@ -564,116 +564,130 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
       }
 
       case InternalEventType.AGENT_CONTEXT_APPEND: {
-        await this.store.appendToThreadContext({
-          ...scope,
-          thread_id: event.thread_id,
-          context: event.context,
-          current_context_usage: event.current_context_usage,
-          completion: event.completion ?? null,
-        });
         const userEvents = [...event.output, ...event.applied_user_events];
-        if (userEvents.length > 0) {
-          await this.store.appendToEvents({
-            ...scope,
-            events: userEvents,
-          });
-        }
-        if (event.applied_user_events.length > 0) {
-          await this.store.markTurnInboundEventsConsumed({
-            ...scope,
-            event_ids: event.applied_user_events.map(out => out.id),
-          });
-        }
+        await this.store.withTransaction(async transaction => {
+          await this.store.appendToThreadContext(
+            {
+              ...scope,
+              thread_id: event.thread_id,
+              context: event.context,
+              current_context_usage: event.current_context_usage,
+              completion: event.completion ?? null,
+            },
+            transaction,
+          );
+          if (userEvents.length > 0) {
+            await this.store.appendToEvents({ ...scope, events: userEvents }, transaction);
+          }
+          if (event.applied_user_events.length > 0) {
+            await this.store.markTurnInboundEventsConsumed(
+              {
+                ...scope,
+                event_ids: event.applied_user_events.map(out => out.id),
+              },
+              transaction,
+            );
+          }
+        });
         yield* event.applied_user_events;
         return;
       }
 
       case InternalEventType.MCP_AUTH_CONTINUE: {
-        await this.store.patchThreadsMCPAuth({
-          ...scope,
-          thread_ids: event.thread_ids,
-          pending_mcp_auth: false,
-        });
-        await this.store.appendToEvents({
-          ...scope,
-          events: [event.event],
-        });
-        await this.store.markTurnInboundEventsConsumed({
-          ...scope,
-          event_ids: [event.event.id],
+        await this.store.withTransaction(async transaction => {
+          await this.store.patchThreadsMCPAuth(
+            {
+              ...scope,
+              thread_ids: event.thread_ids,
+              pending_mcp_auth: false,
+            },
+            transaction,
+          );
+          await this.store.appendToEvents({ ...scope, events: [event.event] }, transaction);
+          await this.store.markTurnInboundEventsConsumed(
+            {
+              ...scope,
+              event_ids: [event.event.id],
+            },
+            transaction,
+          );
         });
         yield event.event;
         return;
       }
 
       case InternalEventType.APPROVAL_POLICY_APPLY: {
-        // Sequential today; once a DB store lands these collapse into one transaction.
-        for (const append of event.context_appends) {
-          await this.store.appendToThreadContext({
-            ...scope,
-            thread_id: append.thread_id,
-            context: append.context,
-            current_context_usage: append.current_context_usage,
-            completion: null,
-          });
-        }
-        if (event.mcp_servers_patches.length > 0) {
-          await this.store.patchMCPServers({ ...scope, mcp_servers: event.mcp_servers_patches });
-        }
-        await this.store.appendToEvents({
-          ...scope,
-          events: [event.event],
-        });
-        await this.store.markTurnInboundEventsConsumed({
-          ...scope,
-          event_ids: [event.event.id],
+        await this.store.withTransaction(async transaction => {
+          for (const append of event.context_appends) {
+            await this.store.appendToThreadContext(
+              {
+                ...scope,
+                thread_id: append.thread_id,
+                context: append.context,
+                current_context_usage: append.current_context_usage,
+                completion: null,
+              },
+              transaction,
+            );
+          }
+          if (event.mcp_servers_patches.length > 0) {
+            await this.store.patchMCPServers({ ...scope, mcp_servers: event.mcp_servers_patches }, transaction);
+          }
+          await this.store.appendToEvents({ ...scope, events: [event.event] }, transaction);
+          await this.store.markTurnInboundEventsConsumed(
+            {
+              ...scope,
+              event_ids: [event.event.id],
+            },
+            transaction,
+          );
         });
         yield event.event;
         return;
       }
 
       case InternalEventType.AGENT_DONE: {
-        if (event.parent) {
+        if (!event.parent) {
+          return;
+        }
+        if (isInternalThreadDoneCancelled(event)) {
           await this.store.removeThreads({
             ...scope,
             thread_ids: [event.thread_id],
           });
-        }
-        if (isInternalThreadDoneCancelled(event)) {
           // Do not send thread.done to the user for a cancelled child.
           return;
         }
-        if (!event.parent) {
-          return;
-        }
         const threadDone = toThreadDoneEvent(event);
-        await this.store.appendToEvents({
-          ...scope,
-          events: [threadDone],
+        await this.store.withTransaction(async transaction => {
+          await this.store.removeThreads({ ...scope, thread_ids: [event.thread_id] }, transaction);
+          await this.store.appendToEvents({ ...scope, events: [threadDone] }, transaction);
         });
         yield threadDone;
         return;
       }
 
       case HarnessEventType.THREAD_CREATED: {
-        await this.store.addThreads({
-          ...scope,
-          threads: [
+        await this.store.withTransaction(async transaction => {
+          await this.store.addThreads(
             {
-              thread_id: event.thread_id,
-              parent: event.parent,
-              agent_info: event.agent_info,
-              context: [],
-              current_context_usage: getEmptyCurrentContextUsage(),
-              completion: null,
-              pending_mcp_auth: false,
-              capability_state: null,
+              ...scope,
+              threads: [
+                {
+                  thread_id: event.thread_id,
+                  parent: event.parent,
+                  agent_info: event.agent_info,
+                  context: [],
+                  current_context_usage: getEmptyCurrentContextUsage(),
+                  completion: null,
+                  pending_mcp_auth: false,
+                  capability_state: null,
+                },
+              ],
             },
-          ],
-        });
-        await this.store.appendToEvents({
-          ...scope,
-          events: [event],
+            transaction,
+          );
+          await this.store.appendToEvents({ ...scope, events: [event] }, transaction);
         });
         yield event;
         return;
@@ -681,46 +695,52 @@ export class TurnHandle<TTurnCustom extends object = Record<string, never>> {
 
       case InternalEventType.MCP_AUTH_REQUIRED: {
         const authEvent = toMCPAuthRequiredEvent(event);
-        await this.store.patchThreadsMCPAuth({
-          ...scope,
-          thread_ids: [event.thread_id],
-          pending_mcp_auth: true,
-        });
-        await this.store.appendToEvents({
-          ...scope,
-          events: [authEvent],
+        await this.store.withTransaction(async transaction => {
+          await this.store.patchThreadsMCPAuth(
+            {
+              ...scope,
+              thread_ids: [event.thread_id],
+              pending_mcp_auth: true,
+            },
+            transaction,
+          );
+          await this.store.appendToEvents({ ...scope, events: [authEvent] }, transaction);
         });
         yield authEvent;
         return;
       }
 
       case HarnessEventType.MCP_INITIALIZE: {
-        await this.store.patchMCPServers({
-          ...scope,
-          mcp_servers: event.mcp_servers.map((initInfo: MCPServerInitInfo) => ({
-            id: initInfo.id,
-            name: initInfo.name,
-            session_id: initInfo.session_id,
-            transport_type: initInfo.transport_type,
-            approval_policies: initInfo.approval_policies,
-          })),
-        });
-        await this.store.appendToEvents({
-          ...scope,
-          events: [event],
+        await this.store.withTransaction(async transaction => {
+          await this.store.patchMCPServers(
+            {
+              ...scope,
+              mcp_servers: event.mcp_servers.map((initInfo: MCPServerInitInfo) => ({
+                id: initInfo.id,
+                name: initInfo.name,
+                session_id: initInfo.session_id,
+                transport_type: initInfo.transport_type,
+                approval_policies: initInfo.approval_policies,
+              })),
+            },
+            transaction,
+          );
+          await this.store.appendToEvents({ ...scope, events: [event] }, transaction);
         });
         yield event;
         return;
       }
 
       case HarnessEventType.SANDBOX_CREATED: {
-        await this.store.patchSandboxInfo({
-          ...scope,
-          sandbox_info: { sandbox_id: event.sandbox_id },
-        });
-        await this.store.appendToEvents({
-          ...scope,
-          events: [event],
+        await this.store.withTransaction(async transaction => {
+          await this.store.patchSandboxInfo(
+            {
+              ...scope,
+              sandbox_info: { sandbox_id: event.sandbox_id },
+            },
+            transaction,
+          );
+          await this.store.appendToEvents({ ...scope, events: [event] }, transaction);
         });
         yield event;
         return;

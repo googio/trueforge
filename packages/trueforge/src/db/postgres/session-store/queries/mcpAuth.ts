@@ -1,16 +1,19 @@
 import type { PatchThreadsMCPAuthInput } from '@truefoundry/trueforge-core/agent-session/store/ISessionStore';
 import { SessionStoreInvariantError } from '@truefoundry/trueforge-core/agent-session/store/SessionStoreErrors';
 import { sql, type Kysely, type Transaction } from 'kysely';
+import { isTransaction } from '../../../transaction';
 import { json, jsonbSet } from '../../sqlExpressions';
 import type { Database, TurnThreadCheckpoint } from '../../types';
 import { assertOwnedNonTerminalTurn } from './turns';
 
+type DbOrTrx = Kysely<Database> | Transaction<Database>;
+
 async function assertThreadsExist(
-  trx: Transaction<Database>,
+  db: Transaction<Database>,
   keys: { session_id: string; turn_id: string },
   threadIds: readonly string[],
 ): Promise<void> {
-  const rows = await trx
+  const rows = await db
     .selectFrom('turn_thread')
     .select('thread_id')
     .where('session_id', '=', keys.session_id)
@@ -24,32 +27,41 @@ async function assertThreadsExist(
   }
 }
 
-export async function patchThreadsMCPAuth(db: Kysely<Database>, input: PatchThreadsMCPAuthInput): Promise<void> {
+export async function patchThreadsMCPAuth(db: DbOrTrx, input: PatchThreadsMCPAuthInput): Promise<void> {
+  if (isTransaction<Database>(db)) {
+    await patchThreadsMCPAuthInTransaction(db, input);
+    return;
+  }
+  await db.transaction().execute(trx => patchThreadsMCPAuthInTransaction(trx, input));
+}
+
+async function patchThreadsMCPAuthInTransaction(
+  db: Transaction<Database>,
+  input: PatchThreadsMCPAuthInput,
+): Promise<void> {
   const threadIds = [...new Set(input.thread_ids)];
   const keys = {
     session_id: input.session_id,
     turn_id: input.turn_id,
     active_executor_id: input.active_executor_id,
   };
-  await db.transaction().execute(async trx => {
-    await assertOwnedNonTerminalTurn(trx, keys);
-    if (threadIds.length === 0) {
-      return;
-    }
-    await assertThreadsExist(trx, keys, threadIds);
-    await trx
-      .updateTable('turn_thread')
-      .set({
-        checkpoint: jsonbSet<TurnThreadCheckpoint>(
-          sql`checkpoint`,
-          sql`'{pending_mcp_auth}'`,
-          json(input.pending_mcp_auth),
-        ),
-        updated_at: sql`now()`,
-      })
-      .where('session_id', '=', input.session_id)
-      .where('turn_id', '=', input.turn_id)
-      .where('thread_id', 'in', threadIds)
-      .execute();
-  });
+  await assertOwnedNonTerminalTurn(db, keys);
+  if (threadIds.length === 0) {
+    return;
+  }
+  await assertThreadsExist(db, keys, threadIds);
+  await db
+    .updateTable('turn_thread')
+    .set({
+      checkpoint: jsonbSet<TurnThreadCheckpoint>(
+        sql`checkpoint`,
+        sql`'{pending_mcp_auth}'`,
+        json(input.pending_mcp_auth),
+      ),
+      updated_at: sql`now()`,
+    })
+    .where('session_id', '=', input.session_id)
+    .where('turn_id', '=', input.turn_id)
+    .where('thread_id', 'in', threadIds)
+    .execute();
 }
