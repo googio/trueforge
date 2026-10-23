@@ -2,7 +2,6 @@ import { sql, type Kysely } from 'kysely';
 
 /**
  * SQLite mirror of postgres/migrations/20261022_000001_session_tfg_source_backfill.ts.
- * The key contains a dot, so JSON paths must quote it.
  */
 export async function up<TDatabase>(db: Kysely<TDatabase>): Promise<void> {
   await db.transaction().execute(async trx => {
