@@ -1,5 +1,11 @@
 # @truefoundry/trueforge-core
 
+## 0.180.0-rc.3
+
+### Patch Changes
+
+- 5fd9cca: Prefix model and MCP failures so logs and the chat error show which system failed.
+
 ## 0.180.0-rc.2
 
 ### Patch Changes

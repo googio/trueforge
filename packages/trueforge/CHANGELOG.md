@@ -1,5 +1,12 @@
 # @truefoundry/trueforge
 
+## 0.180.0-rc.4
+
+### Patch Changes
+
+- Updated dependencies [5fd9cca]
+  - @truefoundry/trueforge-core@0.180.0-rc.3
+
 ## 0.180.0-rc.3
 
 ### Patch Changes
