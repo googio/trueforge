@@ -22,7 +22,7 @@ export class PostgresAccessControlEntryStore implements IAccessControlEntryStore
   ): Promise<SessionAccessRecord[]> {
     const db = transaction ?? this.#db;
     const rows = await db
-      .selectFrom('access_control_entry')
+      .selectFrom('access_control')
       .selectAll()
       .where('tenant_id', '=', input.tenant_id)
       .where('session_id', '=', input.session_id)
@@ -42,7 +42,7 @@ export class PostgresAccessControlEntryStore implements IAccessControlEntryStore
   async grantSessionAccess(input: GrantSessionAccessInput, transaction?: Transaction<Database>): Promise<void> {
     const db = transaction ?? this.#db;
     await db
-      .insertInto('access_control_entry')
+      .insertInto('access_control')
       .values(
         input.subjects.map(subject => ({
           tenant_id: input.tenant_id,
@@ -60,7 +60,7 @@ export class PostgresAccessControlEntryStore implements IAccessControlEntryStore
   async revokeSessionAccess(input: RevokeSessionAccessInput, transaction?: Transaction<Database>): Promise<void> {
     const db = transaction ?? this.#db;
     await db
-      .deleteFrom('access_control_entry')
+      .deleteFrom('access_control')
       .where('tenant_id', '=', input.tenant_id)
       .where('session_id', '=', input.session_id)
       .where(eb =>

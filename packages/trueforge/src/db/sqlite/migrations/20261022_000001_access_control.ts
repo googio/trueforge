@@ -1,10 +1,10 @@
 import { sql, type Kysely } from 'kysely';
 
-/** Mirrors db/postgres/migrations/20261022_000001_access_control_entry.ts. */
+/** Mirrors db/postgres/migrations/20261022_000001_access_control.ts. */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await db.transaction().execute(async trx => {
     await sql`
-      CREATE TABLE access_control_entry (
+      CREATE TABLE access_control (
         tenant_id TEXT NOT NULL,
         session_id TEXT NOT NULL REFERENCES session(session_id) ON DELETE CASCADE,
         subject_type TEXT NOT NULL,
@@ -19,6 +19,6 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 
 export async function down(db: Kysely<unknown>): Promise<void> {
   await db.transaction().execute(async trx => {
-    await sql`DROP TABLE IF EXISTS access_control_entry`.execute(trx);
+    await sql`DROP TABLE IF EXISTS access_control`.execute(trx);
   });
 }

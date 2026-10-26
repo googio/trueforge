@@ -23,7 +23,7 @@ describePg('PostgresAccessControlEntryStore (IAccessControlEntryStore contract)'
 
   beforeEach(async () => {
     if (env !== undefined) {
-      await sql`TRUNCATE TABLE access_control_entry, session RESTART IDENTITY CASCADE`.execute(env.db);
+      await sql`TRUNCATE TABLE access_control, session RESTART IDENTITY CASCADE`.execute(env.db);
     }
   });
 

@@ -123,7 +123,7 @@ export interface SessionTable {
  * PRIMARY KEY (tenant_id, session_id, subject_type, subject_id)
  * FK (session_id) → session(session_id) ON DELETE CASCADE
  */
-export interface AccessControlEntryTable {
+export interface AccessControlTable {
   tenant_id: string;
   session_id: string;
   subject_type: SessionGrantSubjectType;
@@ -618,7 +618,7 @@ export interface OAuthPendingAuthorizationTable {
  */
 export interface Database {
   session: SessionTable;
-  access_control_entry: AccessControlEntryTable;
+  access_control: AccessControlTable;
   turn: TurnTable;
   turn_thread: TurnThreadTable;
   session_event: SessionEventTable;

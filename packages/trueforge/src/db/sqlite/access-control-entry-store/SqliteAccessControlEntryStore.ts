@@ -11,7 +11,7 @@ import { jsonbBind, jsonText, nowIso } from '../sqlExpressions';
 import type { Database } from '../types';
 
 /** Column list projecting the JSONB subject as parsed JSON (see JSON_RESULT_COLUMNS). */
-function recordColumns(eb: ExpressionBuilder<Database, 'access_control_entry'>) {
+function recordColumns(eb: ExpressionBuilder<Database, 'access_control'>) {
   return [
     'tenant_id' as const,
     'session_id' as const,
@@ -35,7 +35,7 @@ export class SqliteAccessControlEntryStore implements IAccessControlEntryStore<T
   ): Promise<SessionAccessRecord[]> {
     const db = transaction ?? this.#db;
     return await db
-      .selectFrom('access_control_entry')
+      .selectFrom('access_control')
       .select(recordColumns)
       .where('tenant_id', '=', input.tenant_id)
       .where('session_id', '=', input.session_id)
@@ -48,7 +48,7 @@ export class SqliteAccessControlEntryStore implements IAccessControlEntryStore<T
     const db = transaction ?? this.#db;
     const timestamp = nowIso();
     await db
-      .insertInto('access_control_entry')
+      .insertInto('access_control')
       .values(
         input.subjects.map(subject => ({
           tenant_id: input.tenant_id,
@@ -66,7 +66,7 @@ export class SqliteAccessControlEntryStore implements IAccessControlEntryStore<T
   async revokeSessionAccess(input: RevokeSessionAccessInput, transaction?: Transaction<Database>): Promise<void> {
     const db = transaction ?? this.#db;
     await db
-      .deleteFrom('access_control_entry')
+      .deleteFrom('access_control')
       .where('tenant_id', '=', input.tenant_id)
       .where('session_id', '=', input.session_id)
       .where(eb =>
