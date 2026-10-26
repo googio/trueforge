@@ -33,6 +33,7 @@ import {
   AgentHarnessError,
   existingSandboxIdForProvider,
   extractErrorLogFields,
+  getOperationMetrics,
   isFileContentPart,
   McpConnectionError,
   newEventId,
@@ -84,8 +85,8 @@ import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry
 import { validateSandboxFilePath } from '../runtime/sandboxFilePath';
 import {
   buildTurnSandbox,
+  getMcpConnection,
   getModelDetails,
-  resolveMcpServer,
   resolveSandboxEnvironment,
   resolveSandboxProvider,
 } from '../runtime/sessionResources';
@@ -314,10 +315,11 @@ function createTurnResolver(deps: {
         }),
         defaultModelParams: resolved.defaultModelParams,
         modelProperties: resolved.modelProperties,
+        providerType: resolved.providerConfig.provider.type,
       };
     },
     mcp: async name => {
-      const connection = await resolveMcpServer({
+      const connection = await getMcpConnection({
         tenant_id,
         name,
         store: mcpServerStore,
@@ -479,6 +481,30 @@ export function streamTTLSecondsFor(event: TurnStreamingEvent): number | undefin
 export function turnStreamId(tenantId: string, sessionId: string, turnId: string): string {
   return redisKey('agent', 'turn', tenantId, sessionId, turnId, 'stream');
 }
+
+/** Client cancel and a turn replaced by the next one are expected endings. */
+function reportUnexpectedTurnDone({ event, logger }: { event: TurnStreamingEvent; logger: Logger }): void {
+  if (event.type !== EventType.TURN_DONE) {
+    return;
+  }
+  const { state } = event;
+  if (state.status === 'error') {
+    // Only the message remains here. The thrown error was already classified, including provider 4xx.
+    logger.error('turn.done error', extractErrorLogFields(new Error(state.message)));
+    return;
+  }
+  if (
+    state.status === 'cancelled' &&
+    (state.reason === CancellationReason.Abandoned || state.reason === CancellationReason.ServerExecutionTimeout)
+  ) {
+    const error = new Error(state.reason);
+    logger.error('turn.done cancelled', {
+      ...extractErrorLogFields(error),
+      reportable_error: { error, extra: { reason: state.reason } },
+    });
+  }
+}
+
 /**
  * Dual-write turn events to the resumable subscription registry, then optionally
  * forward each sequenced event (SSE path). Shared by streaming and non-streaming
@@ -510,6 +536,7 @@ export async function drainTurnEvents(input: {
   const { trackedStream, turnEventStream, executionTimeout, logger, pausedKeepalive, onEvent } = input;
   try {
     for await (const event of trackedStream) {
+      reportUnexpectedTurnDone({ event, logger });
       // Dual-write before any client sink so subscribers can resume after disconnect.
       const sequenceNumber = await turnEventStream.put(event, {
         streamTTLSeconds: streamTTLSecondsFor(event),
@@ -529,7 +556,10 @@ export async function drainTurnEvents(input: {
     if (error instanceof SessionStoreNotFoundError) {
       logger.warn('Turn stream ended after session/turn was removed', extractErrorLogFields(error));
     } else {
-      logger.error('Unexpected error in turn event drain', extractErrorLogFields(error));
+      logger.error('Unexpected error in turn event drain', {
+        ...extractErrorLogFields(error),
+        reportable_error: { error },
+      });
     }
   } finally {
     executionTimeout.clear();
@@ -595,6 +625,7 @@ async function prepareTurnExecution<TTransaction>(input: {
       executionTimer = setTimeout(() => {
         executionTimer = undefined;
         if (!abortController.signal.aborted) {
+          getOperationMetrics()?.recordTurnTimeout({ phase: 'execution' });
           abortController.abort(CancellationReason.ServerExecutionTimeout);
         }
       }, configuration.SERVER_EXECUTION_TIMEOUT_SECONDS * 1000);
@@ -1686,6 +1717,7 @@ export function createTurnsRouter<TTransaction>(deps: TurnsRouterDeps<TTransacti
         ...extractErrorLogFields(error),
         sandboxId,
         path,
+        reportable_error: { error, extra: { sandboxId, path } },
       });
       return c.json({ error: { message: 'Failed to download file from sandbox' } }, 424);
     }
@@ -1808,8 +1840,13 @@ export function createTurnsRouter<TTransaction>(deps: TurnsRouterDeps<TTransacti
         turn_id: turn.id,
       };
       let shouldWriteToSSEStream = true;
+      let closedByServer = false;
       return streamSSE(c, async stream => {
         stream.onAbort(() => {
+          if (closedByServer) {
+            return;
+          }
+          getOperationMetrics()?.recordTurnSseDisconnect({ path: 'create' });
           shouldWriteToSSEStream = false;
           deps.logger.info(
             'Create-turn SSE client disconnected, continuing drain without writing',
@@ -1827,6 +1864,7 @@ export function createTurnsRouter<TTransaction>(deps: TurnsRouterDeps<TTransacti
                 );
               } catch (error) {
                 if (error instanceof PromiseTimeoutError) {
+                  getOperationMetrics()?.recordTurnTimeout({ phase: 'sse_write' });
                   deps.logger.error('SSE stream write timed out', extractErrorLogFields(error));
                 } else {
                   deps.logger.error('SSE stream write error', extractErrorLogFields(error));
@@ -1837,6 +1875,7 @@ export function createTurnsRouter<TTransaction>(deps: TurnsRouterDeps<TTransacti
           },
         });
         if (!shouldWriteToSSEStream && !stream.closed) {
+          closedByServer = true;
           stream.abort();
         }
         await stream.close();
@@ -1966,6 +2005,7 @@ export function createTurnsRouter<TTransaction>(deps: TurnsRouterDeps<TTransacti
     const subscribeAbort = new AbortController();
     const timeoutMs = configuration.TURN_SUBSCRIBE_TIMEOUT_MS;
     const timeoutHandler = setTimeout(() => {
+      getOperationMetrics()?.recordTurnTimeout({ phase: 'subscribe' });
       deps.logger.info('Subscribe turn stream server-side timeout reached, closing stream', {
         afterSequenceNumber,
         timeoutMs,
@@ -1975,6 +2015,7 @@ export function createTurnsRouter<TTransaction>(deps: TurnsRouterDeps<TTransacti
 
     return streamSSE(c, async stream => {
       stream.onAbort(() => {
+        getOperationMetrics()?.recordTurnSseDisconnect({ path: 'subscribe' });
         subscribeAbort.abort(new Error('client-disconnected'));
       });
 
@@ -1988,7 +2029,10 @@ export function createTurnsRouter<TTransaction>(deps: TurnsRouterDeps<TTransacti
         }
       } catch (error) {
         if (!subscribeAbort.signal.aborted) {
-          deps.logger.error('Unexpected error in turn subscribe SSE loop', extractErrorLogFields(error));
+          deps.logger.error('Unexpected error in turn subscribe SSE loop', {
+            ...extractErrorLogFields(error),
+            reportable_error: { error },
+          });
         }
       } finally {
         clearTimeout(timeoutHandler);

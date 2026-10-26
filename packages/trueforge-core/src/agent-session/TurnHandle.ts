@@ -11,6 +11,12 @@ import type {
 } from '../core/events/schema';
 import { EventType as HarnessEventType, newEventId } from '../core/events/schema';
 import {
+  elapsedSeconds,
+  getOperationMetrics,
+  type TurnPersistPhase,
+  type TurnTerminalStatus,
+} from '../core/observability/operationMetrics';
+import {
   InternalEventType,
   type AgentThreadExecutionEvent,
   type AgentThreadExecutionResult,
@@ -35,6 +41,7 @@ import {
 import type { TokenPagination } from './schemas/pagination';
 import {
   CancellationReason,
+  isNonTerminalTurnState,
   type LegacyTurnInputItem,
   type NonTerminalTurnState,
   type TerminalTurnState,
@@ -109,6 +116,13 @@ function toMCPAuthRequiredEvent(event: InternalMCPAuthRequiredEvent): MCPAuthReq
     thread_id: null, // We are not sending thread on the wire event.
     mcp_servers: event.mcp_servers,
   };
+}
+
+function terminalStatusFromState(state: TurnState): TurnTerminalStatus | undefined {
+  if (isNonTerminalTurnState(state)) {
+    return undefined;
+  }
+  return state.status;
 }
 
 function turnMetricsFromAgentThreadMetrics(metrics: AgentThreadMetrics): TurnMetrics {
@@ -288,6 +302,7 @@ export class TurnHandle<TTransaction = never, TTurnCustom extends object = Recor
     if (this.turn.state.status !== 'running' && this.turn.state.status !== 'paused') {
       throw new Error(`Cannot execute a ${this.turn.state.status} turn`);
     }
+    const startedMs = performance.now();
     const turnStatus = this.turn.state.status;
     let caughtError: Error | undefined;
     let executeResult: AgentThreadExecutionResult | undefined;
@@ -300,7 +315,7 @@ export class TurnHandle<TTransaction = never, TTurnCustom extends object = Recor
       caughtError = error instanceof Error ? error : new Error(String(error));
     } finally {
       // A consumer break still enters finally, so the turn closes on that path too.
-      yield* this.closeTurn({ signal, caughtError, executeResult, orchestrator, resolver });
+      yield* this.closeTurn({ signal, caughtError, executeResult, orchestrator, resolver, startedMs });
     }
   }
 
@@ -314,6 +329,7 @@ export class TurnHandle<TTransaction = never, TTurnCustom extends object = Recor
     executeResult: AgentThreadExecutionResult | undefined;
     orchestrator: AgentThreadOrchestrator;
     resolver: ITurnResourceResolver<TTurnCustom>;
+    startedMs: number;
   }): AsyncGenerator<TurnStreamingEvent> {
     let ownershipLost = input.caughtError instanceof TurnOwnershipLostError ? input.caughtError : undefined;
     let turnDone: TurnDoneEvent | undefined;
@@ -341,6 +357,13 @@ export class TurnHandle<TTransaction = never, TTurnCustom extends object = Recor
       input.resolver.logger.info('Offloaded paused turn without a terminal write');
     } else if (ownershipLost !== undefined) {
       input.resolver.logger.info('Lost turn ownership; skipped the terminal write');
+    }
+    const recordedStatus = turnDone?.state.status ?? terminalStatusFromState(this.turn.state);
+    if (recordedStatus !== undefined) {
+      getOperationMetrics()?.recordTurnDuration({
+        terminalStatus: recordedStatus,
+        durationSeconds: elapsedSeconds(input.startedMs),
+      });
     }
     if (turnDone !== undefined) {
       yield turnDone;
@@ -381,12 +404,14 @@ export class TurnHandle<TTransaction = never, TTurnCustom extends object = Recor
       created_at: this.turn.created_at.toISOString(),
       thread_id: null,
     };
-    await this.store.appendToEvents({
-      session_id: this.turn.session_id,
-      turn_id: this.turn.turn_id,
-      active_executor_id: this.turn.active_executor_id,
-      events: [turnCreated],
-    });
+    await this.writeStore('append', () =>
+      this.store.appendToEvents({
+        session_id: this.turn.session_id,
+        turn_id: this.turn.turn_id,
+        active_executor_id: this.turn.active_executor_id,
+        events: [turnCreated],
+      }),
+    );
     return turnCreated;
   }
 
@@ -441,13 +466,15 @@ export class TurnHandle<TTransaction = never, TTurnCustom extends object = Recor
       completed_at: createdAtIso,
     });
     const turnDone = turnDoneEvent(terminalState, createdAtIso);
-    await this.store.updateTurnTerminalState({
-      session_id: this.turn.session_id,
-      turn_id: this.turn.turn_id,
-      active_executor_id: this.turn.active_executor_id,
-      state: terminalState,
-      turn_done_event: turnDone,
-    });
+    await this.writeStore('terminal', () =>
+      this.store.updateTurnTerminalState({
+        session_id: this.turn.session_id,
+        turn_id: this.turn.turn_id,
+        active_executor_id: this.turn.active_executor_id,
+        state: terminalState,
+        turn_done_event: turnDone,
+      }),
+    );
     this.turn = { ...this.turn, state: terminalState, updated_at: updatedAt };
     return turnDone;
   }
@@ -468,8 +495,23 @@ export class TurnHandle<TTransaction = never, TTurnCustom extends object = Recor
 
   private async closeResolver(resolver: ITurnResourceResolver<TTurnCustom>): Promise<void> {
     await resolver.close().catch((err: unknown) => {
-      resolver.logger.warn('TurnResourceResolver.close() failed', { err });
+      resolver.logger.warn('TurnResourceResolver.close() failed', {
+        err,
+        reportable_error: { error: err },
+      });
     });
+  }
+
+  /** Counts a store write failure, then rethrows. A concurrent terminal freeze or lost owner is expected. */
+  private async writeStore<T>(phase: TurnPersistPhase, run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      if (!(error instanceof TurnNotRunningError) && !(error instanceof TurnOwnershipLostError)) {
+        getOperationMetrics()?.recordTurnPersistError({ phase });
+      }
+      throw error;
+    }
   }
 
   /** Paginated read of this turn's persisted events. */
@@ -502,13 +544,15 @@ export class TurnHandle<TTransaction = never, TTurnCustom extends object = Recor
       created_at: updatedAt.toISOString(),
       thread_id: null,
     };
-    await this.store.updateTurnNonTerminalState({
-      session_id: this.turn.session_id,
-      turn_id: this.turn.turn_id,
-      active_executor_id: this.turn.active_executor_id,
-      state,
-      turn_update_event: turnUpdate,
-    });
+    await this.writeStore('append', () =>
+      this.store.updateTurnNonTerminalState({
+        session_id: this.turn.session_id,
+        turn_id: this.turn.turn_id,
+        active_executor_id: this.turn.active_executor_id,
+        state,
+        turn_update_event: turnUpdate,
+      }),
+    );
     this.turn = { ...this.turn, state, updated_at: updatedAt };
     return turnUpdate;
   }
@@ -530,10 +574,12 @@ export class TurnHandle<TTransaction = never, TTurnCustom extends object = Recor
         return;
 
       case HarnessEventType.TOOL_RESPONSE:
-        await this.store.appendToEvents({
-          ...scope,
-          events: [event],
-        });
+        await this.writeStore('append', () =>
+          this.store.appendToEvents({
+            ...scope,
+            events: [event],
+          }),
+        );
         yield event;
         return;
 
@@ -549,99 +595,107 @@ export class TurnHandle<TTransaction = never, TTurnCustom extends object = Recor
             `CAPABILITY_STATE for key '${event.key}' must not be undefined — use null to clear durable state`,
           );
         }
-        await this.store.patchThreadCapabilityState({
-          ...scope,
-          thread_id: event.thread_id,
-          key: event.key,
-          state: event.state,
-        });
+        await this.writeStore('append', () =>
+          this.store.patchThreadCapabilityState({
+            ...scope,
+            thread_id: event.thread_id,
+            key: event.key,
+            state: event.state,
+          }),
+        );
         return;
       }
 
       case HarnessEventType.AGENT_CONTEXT_OVERWRITE: {
-        await this.store.overwriteThreadContext({ ...scope, event });
+        await this.writeStore('append', () => this.store.overwriteThreadContext({ ...scope, event }));
         return;
       }
 
       case InternalEventType.AGENT_CONTEXT_APPEND: {
         const userEvents = [...event.output, ...event.applied_user_events];
-        await this.store.withTransaction(async transaction => {
-          await this.store.appendToThreadContext(
-            {
-              ...scope,
-              thread_id: event.thread_id,
-              context: event.context,
-              current_context_usage: event.current_context_usage,
-              completion: event.completion ?? null,
-            },
-            transaction,
-          );
-          if (userEvents.length > 0) {
-            await this.store.appendToEvents({ ...scope, events: userEvents }, transaction);
-          }
-          if (event.applied_user_events.length > 0) {
-            await this.store.markTurnInboundEventsConsumed(
+        await this.writeStore('append', () =>
+          this.store.withTransaction(async transaction => {
+            await this.store.appendToThreadContext(
               {
                 ...scope,
-                event_ids: event.applied_user_events.map(out => out.id),
+                thread_id: event.thread_id,
+                context: event.context,
+                current_context_usage: event.current_context_usage,
+                completion: event.completion ?? null,
               },
               transaction,
             );
-          }
-        });
+            if (userEvents.length > 0) {
+              await this.store.appendToEvents({ ...scope, events: userEvents }, transaction);
+            }
+            if (event.applied_user_events.length > 0) {
+              await this.store.markTurnInboundEventsConsumed(
+                {
+                  ...scope,
+                  event_ids: event.applied_user_events.map(out => out.id),
+                },
+                transaction,
+              );
+            }
+          }),
+        );
         yield* event.applied_user_events;
         return;
       }
 
       case InternalEventType.MCP_AUTH_CONTINUE: {
-        await this.store.withTransaction(async transaction => {
-          await this.store.patchThreadsMCPAuth(
-            {
-              ...scope,
-              thread_ids: event.thread_ids,
-              pending_mcp_auth: false,
-            },
-            transaction,
-          );
-          await this.store.appendToEvents({ ...scope, events: [event.event] }, transaction);
-          await this.store.markTurnInboundEventsConsumed(
-            {
-              ...scope,
-              event_ids: [event.event.id],
-            },
-            transaction,
-          );
-        });
+        await this.writeStore('append', () =>
+          this.store.withTransaction(async transaction => {
+            await this.store.patchThreadsMCPAuth(
+              {
+                ...scope,
+                thread_ids: event.thread_ids,
+                pending_mcp_auth: false,
+              },
+              transaction,
+            );
+            await this.store.appendToEvents({ ...scope, events: [event.event] }, transaction);
+            await this.store.markTurnInboundEventsConsumed(
+              {
+                ...scope,
+                event_ids: [event.event.id],
+              },
+              transaction,
+            );
+          }),
+        );
         yield event.event;
         return;
       }
 
       case InternalEventType.APPROVAL_POLICY_APPLY: {
-        await this.store.withTransaction(async transaction => {
-          for (const append of event.context_appends) {
-            await this.store.appendToThreadContext(
+        await this.writeStore('append', () =>
+          this.store.withTransaction(async transaction => {
+            for (const append of event.context_appends) {
+              await this.store.appendToThreadContext(
+                {
+                  ...scope,
+                  thread_id: append.thread_id,
+                  context: append.context,
+                  current_context_usage: append.current_context_usage,
+                  completion: null,
+                },
+                transaction,
+              );
+            }
+            if (event.mcp_servers_patches.length > 0) {
+              await this.store.patchMCPServers({ ...scope, mcp_servers: event.mcp_servers_patches }, transaction);
+            }
+            await this.store.appendToEvents({ ...scope, events: [event.event] }, transaction);
+            await this.store.markTurnInboundEventsConsumed(
               {
                 ...scope,
-                thread_id: append.thread_id,
-                context: append.context,
-                current_context_usage: append.current_context_usage,
-                completion: null,
+                event_ids: [event.event.id],
               },
               transaction,
             );
-          }
-          if (event.mcp_servers_patches.length > 0) {
-            await this.store.patchMCPServers({ ...scope, mcp_servers: event.mcp_servers_patches }, transaction);
-          }
-          await this.store.appendToEvents({ ...scope, events: [event.event] }, transaction);
-          await this.store.markTurnInboundEventsConsumed(
-            {
-              ...scope,
-              event_ids: [event.event.id],
-            },
-            transaction,
-          );
-        });
+          }),
+        );
         yield event.event;
         return;
       }
@@ -651,117 +705,133 @@ export class TurnHandle<TTransaction = never, TTurnCustom extends object = Recor
           return;
         }
         if (isInternalThreadDoneCancelled(event)) {
-          await this.store.removeThreads({
-            ...scope,
-            thread_ids: [event.thread_id],
-          });
+          await this.writeStore('append', () =>
+            this.store.removeThreads({
+              ...scope,
+              thread_ids: [event.thread_id],
+            }),
+          );
           // Do not send thread.done to the user for a cancelled child.
           return;
         }
         const threadDone = toThreadDoneEvent(event);
-        await this.store.withTransaction(async transaction => {
-          await this.store.removeThreads({ ...scope, thread_ids: [event.thread_id] }, transaction);
-          await this.store.appendToEvents({ ...scope, events: [threadDone] }, transaction);
-        });
+        await this.writeStore('append', () =>
+          this.store.withTransaction(async transaction => {
+            await this.store.removeThreads({ ...scope, thread_ids: [event.thread_id] }, transaction);
+            await this.store.appendToEvents({ ...scope, events: [threadDone] }, transaction);
+          }),
+        );
         yield threadDone;
         return;
       }
 
       case HarnessEventType.THREAD_CREATED: {
-        await this.store.withTransaction(async transaction => {
-          await this.store.addThreads(
-            {
-              ...scope,
-              threads: [
-                {
-                  thread_id: event.thread_id,
-                  parent: event.parent,
-                  agent_info: event.agent_info,
-                  context: [],
-                  current_context_usage: getEmptyCurrentContextUsage(),
-                  completion: null,
-                  pending_mcp_auth: false,
-                  capability_state: null,
-                },
-              ],
-            },
-            transaction,
-          );
-          await this.store.appendToEvents({ ...scope, events: [event] }, transaction);
-        });
+        await this.writeStore('append', () =>
+          this.store.withTransaction(async transaction => {
+            await this.store.addThreads(
+              {
+                ...scope,
+                threads: [
+                  {
+                    thread_id: event.thread_id,
+                    parent: event.parent,
+                    agent_info: event.agent_info,
+                    context: [],
+                    current_context_usage: getEmptyCurrentContextUsage(),
+                    completion: null,
+                    pending_mcp_auth: false,
+                    capability_state: null,
+                  },
+                ],
+              },
+              transaction,
+            );
+            await this.store.appendToEvents({ ...scope, events: [event] }, transaction);
+          }),
+        );
         yield event;
         return;
       }
 
       case InternalEventType.MCP_AUTH_REQUIRED: {
         const authEvent = toMCPAuthRequiredEvent(event);
-        await this.store.withTransaction(async transaction => {
-          await this.store.patchThreadsMCPAuth(
-            {
-              ...scope,
-              thread_ids: [event.thread_id],
-              pending_mcp_auth: true,
-            },
-            transaction,
-          );
-          await this.store.appendToEvents({ ...scope, events: [authEvent] }, transaction);
-        });
+        await this.writeStore('append', () =>
+          this.store.withTransaction(async transaction => {
+            await this.store.patchThreadsMCPAuth(
+              {
+                ...scope,
+                thread_ids: [event.thread_id],
+                pending_mcp_auth: true,
+              },
+              transaction,
+            );
+            await this.store.appendToEvents({ ...scope, events: [authEvent] }, transaction);
+          }),
+        );
         yield authEvent;
         return;
       }
 
       case HarnessEventType.MCP_INITIALIZE: {
-        await this.store.withTransaction(async transaction => {
-          await this.store.patchMCPServers(
-            {
-              ...scope,
-              mcp_servers: event.mcp_servers.map((initInfo: MCPServerInitInfo) => ({
-                id: initInfo.id,
-                name: initInfo.name,
-                session_id: initInfo.session_id,
-                transport_type: initInfo.transport_type,
-                approval_policies: initInfo.approval_policies,
-              })),
-            },
-            transaction,
-          );
-          await this.store.appendToEvents({ ...scope, events: [event] }, transaction);
-        });
+        await this.writeStore('append', () =>
+          this.store.withTransaction(async transaction => {
+            await this.store.patchMCPServers(
+              {
+                ...scope,
+                mcp_servers: event.mcp_servers.map((initInfo: MCPServerInitInfo) => ({
+                  id: initInfo.id,
+                  name: initInfo.name,
+                  session_id: initInfo.session_id,
+                  transport_type: initInfo.transport_type,
+                  approval_policies: initInfo.approval_policies,
+                })),
+              },
+              transaction,
+            );
+            await this.store.appendToEvents({ ...scope, events: [event] }, transaction);
+          }),
+        );
         yield event;
         return;
       }
 
       case HarnessEventType.SANDBOX_CREATED: {
-        await this.store.withTransaction(async transaction => {
-          await this.store.patchSandboxInfo(
-            {
-              ...scope,
-              sandbox_info: { sandbox_id: event.sandbox_id },
-            },
-            transaction,
-          );
-          await this.store.appendToEvents({ ...scope, events: [event] }, transaction);
-        });
+        await this.writeStore('append', () =>
+          this.store.withTransaction(async transaction => {
+            await this.store.patchSandboxInfo(
+              {
+                ...scope,
+                sandbox_info: { sandbox_id: event.sandbox_id },
+              },
+              transaction,
+            );
+            await this.store.appendToEvents({ ...scope, events: [event] }, transaction);
+          }),
+        );
         yield event;
         return;
       }
 
       case HarnessEventType.TOOL_APPROVAL_REQUIRED:
       case HarnessEventType.TOOL_RESPONSE_REQUIRED: {
-        await this.store.appendToEvents({
-          ...scope,
-          events: [event],
-        });
+        await this.writeStore('append', () =>
+          this.store.appendToEvents({
+            ...scope,
+            events: [event],
+          }),
+        );
         yield event;
         return;
       }
 
       default: {
         // Registered passthrough (orchestrator unwraps PASSTHROUGH before yield).
-        await this.store.appendToEvents({
-          ...scope,
-          events: [event],
-        });
+        await this.writeStore('append', () =>
+          this.store.appendToEvents({
+            ...scope,
+            events: [event],
+          }),
+        );
         yield event;
         return;
       }

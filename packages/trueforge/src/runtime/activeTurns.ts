@@ -5,6 +5,7 @@
  * `track()` owns registration and cleanup around the stream lifecycle.
  */
 import { CancellationReason, TurnOffloadReason, type TurnHandle } from '@truefoundry/trueforge-core/agent-session';
+import { getOperationMetrics } from '@truefoundry/trueforge-core/core';
 import { Mutex } from 'async-mutex';
 import type { Logger } from 'winston';
 
@@ -125,6 +126,7 @@ export class ActiveTurnRegistry<TTransaction = never> {
         ...setupTurnRun(input.abortController),
       };
       this.runs.set(key, run);
+      getOperationMetrics()?.recordActiveTurns({ delta: 1 });
     }
 
     // Accepted HTTP may still call track() after shutdownAndWait snapshotted.
@@ -140,6 +142,7 @@ export class ActiveTurnRegistry<TTransaction = never> {
     const complete = () => {
       this.clearPausedKeepalive({ sessionId: input.turn.session_id, turnId: input.turn.id });
       run.markCompleted();
+      getOperationMetrics()?.recordActiveTurns({ delta: -1 });
       if (this.runs.get(key) === run) {
         this.runs.delete(key);
       }
@@ -228,6 +231,7 @@ export class ActiveTurnRegistry<TTransaction = never> {
       ...setupTurnRun(input.abortController),
     };
     this.runs.set(key, run);
+    getOperationMetrics()?.recordActiveTurns({ delta: 1 });
     // Resume can insert this run after shutdownAndWait snapshotted `runs` or already returned.
     // Abort now so rebuilding does not start a stream that loop will never run.
     if (this.alreadyShutDownAbortReason !== undefined && !input.abortController.signal.aborted) {
@@ -245,6 +249,7 @@ export class ActiveTurnRegistry<TTransaction = never> {
     }
     this.runs.delete(key);
     run.markCompleted();
+    getOperationMetrics()?.recordActiveTurns({ delta: -1 });
   }
 
   /**

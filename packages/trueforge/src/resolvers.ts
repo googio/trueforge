@@ -176,8 +176,9 @@ export function buildResolveAgentStore(options: {
   persistenceStore: PostgresAgentStore;
   db: Kysely<PostgresDatabase>;
   client: TrueFoundryServiceFoundryServerClient | undefined;
+  logger: Logger;
 }): ResolveAgentStore<Transaction<PostgresDatabase>> {
-  const { persistenceStore, client, db } = options;
+  const { persistenceStore, client, db, logger } = options;
   return requestContext => {
     if (client) {
       return new TrueFoundryAgentStore({
@@ -185,6 +186,7 @@ export function buildResolveAgentStore(options: {
         client,
         requestContext,
         db,
+        logger,
       });
     }
     return persistenceStore;
