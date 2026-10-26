@@ -203,6 +203,8 @@ export interface AgentThreadOrchestratorInput {
    * is patched onto these records. This turn often does not emit `mcp.initialize` again.
    */
   mcpServers: MCPServerInitInfo[];
+  /** Empty for a new turn. A rebuilt paused turn passes its checkpoint cumulative. */
+  metricsBaseline: AgentThreadMetrics;
 }
 
 export class AgentThreadOrchestrator {
@@ -212,6 +214,8 @@ export class AgentThreadOrchestrator {
   private readonly logger: Logger;
   // Finished sub-agents removed from `agentThreads`; kept so totals still include them.
   private finishedSubAgentMetrics: AgentThreadMetrics = createEmptyAgentThreadMetrics();
+  // Paused checkpoint on rebuild. Empty on create. Not copied onto threads.
+  private readonly metricsBaseline: AgentThreadMetrics;
   private readonly wakeSignal: Signalable = signalable();
   private readonly pendingTurnEvents: TurnUserEvent[];
   // Last-seen MCP server init records (by id)/
@@ -223,6 +227,9 @@ export class AgentThreadOrchestrator {
     this.tracing = params.tracing;
     this.logger = params.logger.child({ module: 'AgentThreadOrchestrator' });
     this.pendingTurnEvents = [...params.pendingTurnEvents];
+    const metricsBaseline = createEmptyAgentThreadMetrics();
+    addAgentThreadMetrics(metricsBaseline, params.metricsBaseline);
+    this.metricsBaseline = metricsBaseline;
     for (const server of params.mcpServers) {
       this.mcpServerInitInfoById.set(server.id, server);
     }
@@ -233,12 +240,13 @@ export class AgentThreadOrchestrator {
   }
 
   /**
-   * Turn-wide metrics so far: live threads plus finished sub-agents.
+   * Turn-wide metrics so far: the rebuild baseline, live threads, and finished sub-agents.
    * Safe mid-flight and after cancel/error (`execute()` may not return).
    * Each thread is counted once — a sub-agent moves from live → finished atomically.
    */
   public getMetrics(): AgentThreadMetrics {
     const total = createEmptyAgentThreadMetrics();
+    addAgentThreadMetrics(total, this.metricsBaseline);
     addAgentThreadMetrics(total, this.finishedSubAgentMetrics);
     for (const thread of this.agentThreads.values()) {
       addAgentThreadMetrics(total, thread.getAgentThreadMetrics());

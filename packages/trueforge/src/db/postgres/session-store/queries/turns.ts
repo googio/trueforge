@@ -29,6 +29,12 @@ import {
   TurnNotRunningError,
   TurnOwnershipLostError,
 } from '@truefoundry/trueforge-core/agent-session/store/SessionStoreErrors';
+import {
+  cancelledStateWithCheckpointMetrics,
+  createInitialTurnMetricsCheckpoint,
+  foldTurnMetricsCheckpoint,
+  resolveStoredTurnMetricsCheckpoint,
+} from '@truefoundry/trueforge-core/agent-session/turnMetricsAccounting';
 import type { CapabilityState, JsonValue } from '@truefoundry/trueforge-core/core/capabilities/AgentCapability';
 import type { AgentInfo, AgentParent, MCPServerInitInfo } from '@truefoundry/trueforge-core/core/events/schema';
 import type {
@@ -147,29 +153,32 @@ function lastTurnDetails(input: { turn_id: string; turn_state: TurnState }): Raw
   return json(SessionLastTurnDetailsSchema.parse({ id: input.turn_id, state: input.turn_state }));
 }
 
-/** Terminal states fold cost and duration; last_turn_details moves only for the session's last turn. */
+/** Folds the closed interval and cost delta. last_turn_details moves only for the session's last turn. */
 async function applyTurnStateToSession(
   db: Transaction<Database>,
-  input: { id: string; turn_id: string; turn_created_at: Date; turn_state: TurnState },
+  input: {
+    id: string;
+    turn_id: string;
+    turn_state: TurnState;
+    duration_ms: number;
+    cost_delta: number | undefined;
+  },
 ): Promise<void> {
   let metrics: RawBuilder<SessionMetrics> | undefined;
-  if (!isNonTerminalTurnState(input.turn_state)) {
-    const elapsed_ms = Date.parse(input.turn_state.completed_at) - input.turn_created_at.getTime();
-    const total_duration_ms = elapsed_ms > 0 ? Math.trunc(elapsed_ms) : 0;
-    const turnCost = input.turn_state.metrics?.total_cost_in_usd;
+  if (input.duration_ms > 0) {
     // bigint: ::int overflows at ~24.8 days of summed ms and would roll back the terminal tx.
     metrics = jsonbSet<SessionMetrics>(
       sql`metrics`,
       sql`'{total_duration_ms}'`,
-      sql`to_jsonb((metrics->>'total_duration_ms')::bigint + ${total_duration_ms}::bigint)`,
+      sql`to_jsonb((metrics->>'total_duration_ms')::bigint + ${input.duration_ms}::bigint)`,
     );
-    if (turnCost !== undefined) {
-      metrics = jsonbSet<SessionMetrics>(
-        metrics,
-        sql`'{total_cost_in_usd}'`,
-        sql`to_jsonb(COALESCE((metrics->>'total_cost_in_usd')::double precision, 0) + ${turnCost}::double precision)`,
-      );
-    }
+  }
+  if (input.cost_delta !== undefined) {
+    metrics = jsonbSet<SessionMetrics>(
+      metrics ?? sql`metrics`,
+      sql`'{total_cost_in_usd}'`,
+      sql`to_jsonb(COALESCE((metrics->>'total_cost_in_usd')::double precision, 0) + ${input.cost_delta}::double precision)`,
+    );
   }
   await db
     .updateTable('session')
@@ -223,6 +232,28 @@ export function turnNonTerminalFence(db: TurnFenceDb, keys: TurnKeys) {
     .where('active_executor_id', '=', keys.active_executor_id)
     .where(sql<boolean>`state->>'status' IN ('running', 'paused')`)
     .forShare();
+}
+
+/** Lock the turn row and read the checkpoint used to fold this transition. */
+async function loadTurnMetricsRow(
+  db: Transaction<Database>,
+  keys: { session_id: string; turn_id: string },
+): Promise<
+  | {
+      state: TurnState;
+      checkpoint: TurnCheckpoint;
+      active_executor_id: string;
+      created_at: Date;
+    }
+  | undefined
+> {
+  return db
+    .selectFrom('turn')
+    .select(['state', 'checkpoint', 'active_executor_id', 'created_at'])
+    .where('session_id', '=', keys.session_id)
+    .where('turn_id', '=', keys.turn_id)
+    .forUpdate()
+    .executeTakeFirst();
 }
 
 /** Read owner and status. Missing turn returns undefined. No row lock. */
@@ -416,6 +447,11 @@ async function assembleTurnRecord(
     threads,
     mcp_servers: checkpoint.mcp_servers,
     sandbox_info: checkpoint.sandbox_info,
+    metrics_checkpoint: resolveStoredTurnMetricsCheckpoint({
+      checkpoint,
+      state: turn.state,
+      created_at: turn.created_at,
+    }),
   };
 
   return {
@@ -582,12 +618,12 @@ export async function createTurn(db: Kysely<Database>, input: CreateTurnInput): 
         capability_states: input.capability_states,
       });
 
+      const now = new Date();
       const checkpoint: TurnCheckpoint = {
         mcp_servers: input.mcp_servers ?? prevCheckpoint?.mcp_servers ?? null,
         sandbox_info: input.sandbox_info ?? prevCheckpoint?.sandbox_info ?? null,
+        metrics_checkpoint: createInitialTurnMetricsCheckpoint(now.toISOString()),
       };
-
-      const now = new Date();
 
       const turnCustom = input.turn.custom ?? null;
 
@@ -739,44 +775,59 @@ export async function createTurn(db: Kysely<Database>, input: CreateTurnInput): 
  */
 export async function freezeAndGetTurn(db: Kysely<Database>, input: FreezeAndGetTurnInput): Promise<TurnRecord> {
   return await db.transaction().execute(async trx => {
-    const cancelledState: TerminalTurnState = {
-      status: 'cancelled',
-      reason: input.reason,
-      completed_at: new Date().toISOString(),
-    };
-
-    // UPDATE waits for in-flight turn-scoped writes (FOR SHARE on this row) to
-    // commit; assembly below then includes every committed straggler.
-    const updateResult = await trx
-      .updateTable('turn')
-      .set({
-        state: cancelledState,
-        updated_at: sql`now()`,
-      })
-      .where('session_id', '=', input.session_id)
-      .where('turn_id', '=', input.turn_id)
-      .where(sql<boolean>`state->>'status' IN ('running', 'paused')`)
-      .returning(['created_at'])
-      .executeTakeFirst();
-
-    if (updateResult !== undefined) {
-      await trx
-        .insertInto('session_event')
-        .values({
-          session_id: input.session_id,
-          turn_id: input.turn_id,
-          event_id: input.turn_done_event.id,
-          event: json(input.turn_done_event),
-          created_at: new Date(input.turn_done_event.created_at),
-        })
-        .execute();
-      // Only the winning cancel folds; a freeze of an already-terminal turn is a read.
-      await applyTurnStateToSession(trx, {
-        id: input.session_id,
-        turn_id: input.turn_id,
-        turn_created_at: updateResult.created_at,
-        turn_state: cancelledState,
+    const locked = await loadTurnMetricsRow(trx, input);
+    if (locked !== undefined && isNonTerminalTurnState(locked.state)) {
+      const completed_at = new Date().toISOString();
+      const folded = foldTurnMetricsCheckpoint({
+        stored: resolveStoredTurnMetricsCheckpoint({
+          checkpoint: locked.checkpoint,
+          state: locked.state,
+          created_at: locked.created_at,
+        }),
+        transition: {
+          kind: 'freeze',
+          completed_at,
+          stored_status: locked.state.status,
+        },
       });
+      const cancelledState = cancelledStateWithCheckpointMetrics({
+        reason: input.reason,
+        completed_at,
+        public_metrics: folded.public_metrics,
+      });
+      // The row lock is held from loadTurnMetricsRow. The status predicate is the winning cancel.
+      const updated = await trx
+        .updateTable('turn')
+        .set({
+          state: cancelledState,
+          checkpoint: jsonbSet<TurnCheckpoint>(sql`checkpoint`, sql`'{metrics_checkpoint}'`, json(folded.checkpoint)),
+          updated_at: sql`now()`,
+        })
+        .where('session_id', '=', input.session_id)
+        .where('turn_id', '=', input.turn_id)
+        .where(sql<boolean>`state->>'status' IN ('running', 'paused')`)
+        .executeTakeFirst();
+
+      if (Number(updated.numUpdatedRows) > 0) {
+        await trx
+          .insertInto('session_event')
+          .values({
+            session_id: input.session_id,
+            turn_id: input.turn_id,
+            event_id: input.turn_done_event.id,
+            event: json(input.turn_done_event),
+            created_at: new Date(input.turn_done_event.created_at),
+          })
+          .execute();
+        // Only the winning cancel folds; a freeze of an already-terminal turn is a read.
+        await applyTurnStateToSession(trx, {
+          id: input.session_id,
+          turn_id: input.turn_id,
+          turn_state: cancelledState,
+          duration_ms: folded.duration_ms,
+          cost_delta: folded.cost_delta,
+        });
+      }
     }
 
     const record = await assembleTurnRecord(trx, input);
@@ -838,44 +889,61 @@ export async function listTurns(db: Kysely<Database>, input: ListTurnsInput): Pr
   };
 }
 
-/** Atomically transitions running ↔ paused and appends turn.update. */
+/** Atomically transitions running ↔ paused, checkpoints metrics, and appends turn.update. */
 export async function updateTurnNonTerminalState(
   db: Kysely<Database>,
   input: UpdateTurnNonTerminalStateInput,
 ): Promise<void> {
   await db.transaction().execute(async trx => {
     const expectedSourceStatus = input.state.status === 'paused' ? 'running' : 'paused';
-    const result = await trx
+    const locked = await loadTurnMetricsRow(trx, input);
+    if (locked === undefined) {
+      throw new TurnNotFoundError(input.turn_id);
+    }
+    throwIfExecutorMismatch(input, locked.active_executor_id);
+    if (locked.state.status !== expectedSourceStatus) {
+      if (isNonTerminalTurnState(locked.state)) {
+        throw new SessionStoreInvariantError(
+          `expected ${expectedSourceStatus} state for turn ${input.turn_id}, got ${locked.state.status}`,
+        );
+      }
+      throw new TurnNotRunningError(input.turn_id, terminalTurnState(locked.state, input.turn_id));
+    }
+    if (input.accounting.status !== input.state.status) {
+      throw new SessionStoreInvariantError(
+        `accounting status ${input.accounting.status} does not match state ${input.state.status} for turn ${input.turn_id}`,
+      );
+    }
+    const folded = foldTurnMetricsCheckpoint({
+      stored: resolveStoredTurnMetricsCheckpoint({
+        checkpoint: locked.checkpoint,
+        state: locked.state,
+        created_at: locked.created_at,
+      }),
+      transition:
+        input.accounting.status === 'paused'
+          ? {
+              kind: 'pause',
+              observed_at: input.accounting.observed_at,
+              metrics: input.accounting.metrics,
+            }
+          : { kind: 'resume', observed_at: input.accounting.observed_at },
+    });
+    const updated = await trx
       .updateTable('turn')
       .set({
         state: input.state,
+        checkpoint: jsonbSet<TurnCheckpoint>(sql`checkpoint`, sql`'{metrics_checkpoint}'`, json(folded.checkpoint)),
         updated_at: sql`now()`,
       })
       .where('session_id', '=', input.session_id)
       .where('turn_id', '=', input.turn_id)
       .where('active_executor_id', '=', input.active_executor_id)
       .where(sql<boolean>`state->>'status' = ${expectedSourceStatus}`)
-      .returning(['created_at'])
       .executeTakeFirst();
 
-    if (result === undefined) {
-      const existing = await trx
-        .selectFrom('turn')
-        .select(['state', 'active_executor_id'])
-        .where('session_id', '=', input.session_id)
-        .where('turn_id', '=', input.turn_id)
-        .executeTakeFirst();
-
-      if (!existing) {
-        throw new TurnNotFoundError(input.turn_id);
-      }
-      throwIfExecutorMismatch(input, existing.active_executor_id);
-      if (isNonTerminalTurnState(existing.state)) {
-        throw new SessionStoreInvariantError(
-          `expected ${expectedSourceStatus} state for turn ${input.turn_id}, got ${existing.state.status}`,
-        );
-      }
-      throw new TurnNotRunningError(input.turn_id, terminalTurnState(existing.state, input.turn_id));
+    if (Number(updated.numUpdatedRows) === 0) {
+      throw new SessionStoreInvariantError(`turn ${input.turn_id} changed before the metrics checkpoint was written`);
     }
 
     await trx
@@ -892,51 +960,64 @@ export async function updateTurnNonTerminalState(
     await applyTurnStateToSession(trx, {
       id: input.session_id,
       turn_id: input.turn_id,
-      turn_created_at: result.created_at,
       turn_state: input.state,
+      duration_ms: folded.duration_ms,
+      cost_delta: folded.cost_delta,
     });
   });
 }
 
-/** Atomically transitions a non-terminal turn to terminal and appends turn.done. */
+/** Atomically transitions a non-terminal turn to terminal, checkpoints metrics, and appends turn.done. */
 export async function updateTurnTerminalState(
   db: Kysely<Database>,
   input: UpdateTurnTerminalStateInput,
 ): Promise<void> {
   await db.transaction().execute(async trx => {
-    const result = await trx
+    const locked = await loadTurnMetricsRow(trx, input);
+    if (locked === undefined) {
+      throw new TurnNotFoundError(input.turn_id);
+    }
+    throwIfExecutorMismatch(input, locked.active_executor_id);
+    if (!isNonTerminalTurnState(locked.state)) {
+      throw new TurnNotRunningError(input.turn_id, terminalTurnState(locked.state, input.turn_id));
+    }
+    const folded = foldTurnMetricsCheckpoint({
+      stored: resolveStoredTurnMetricsCheckpoint({
+        checkpoint: locked.checkpoint,
+        state: locked.state,
+        created_at: locked.created_at,
+      }),
+      transition: {
+        kind: 'terminal',
+        completed_at: input.state.completed_at,
+        stored_status: locked.state.status,
+        metrics: input.metrics,
+        reported_cost: input.state.metrics?.total_cost_in_usd,
+      },
+    });
+    const updated = await trx
       .updateTable('turn')
       .set({
         state: input.state,
+        checkpoint: jsonbSet<TurnCheckpoint>(sql`checkpoint`, sql`'{metrics_checkpoint}'`, json(folded.checkpoint)),
         updated_at: sql`now()`,
       })
       .where('session_id', '=', input.session_id)
       .where('turn_id', '=', input.turn_id)
       .where('active_executor_id', '=', input.active_executor_id)
       .where(sql<boolean>`state->>'status' IN ('running', 'paused')`)
-      .returning(['created_at'])
       .executeTakeFirst();
 
-    if (result === undefined) {
-      const existing = await trx
-        .selectFrom('turn')
-        .select(['state', 'active_executor_id'])
-        .where('session_id', '=', input.session_id)
-        .where('turn_id', '=', input.turn_id)
-        .executeTakeFirst();
-
-      if (!existing) {
-        throw new TurnNotFoundError(input.turn_id);
-      }
-      throwIfExecutorMismatch(input, existing.active_executor_id);
-      throw new TurnNotRunningError(input.turn_id, terminalTurnState(existing.state, input.turn_id));
+    if (Number(updated.numUpdatedRows) === 0) {
+      throw new SessionStoreInvariantError(`turn ${input.turn_id} changed before the metrics checkpoint was written`);
     }
 
     await applyTurnStateToSession(trx, {
       id: input.session_id,
       turn_id: input.turn_id,
-      turn_created_at: result.created_at,
       turn_state: input.state,
+      duration_ms: folded.duration_ms,
+      cost_delta: folded.cost_delta,
     });
 
     await trx

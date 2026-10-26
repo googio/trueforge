@@ -6,7 +6,13 @@ import type { TurnRecord, TurnSnapshot } from '../models/TurnRecord';
 import type { PersistedTurnEvent, SessionEventItem } from '../schemas/events';
 import type { TokenPagination } from '../schemas/pagination';
 import { SessionLastTurnDetailsSchema } from '../schemas/session';
-import { isNonTerminalTurnState, type TerminalTurnState, type TurnState } from '../schemas/turn';
+import { isNonTerminalTurnState, type TurnState } from '../schemas/turn';
+import {
+  cancelledStateWithCheckpointMetrics,
+  createInitialTurnMetricsCheckpoint,
+  foldTurnMetricsCheckpoint,
+  resolveStoredTurnMetricsCheckpoint,
+} from '../turnMetricsAccounting';
 import { assertCreateTurnThreadDelta } from './assertCreateTurnThreadDelta';
 import type {
   AddThreadsInput,
@@ -134,6 +140,7 @@ function buildSnapshotFromDelta(input: {
   new_threads: NewThreadInit[];
   new_context_appends: TurnContextAppend[];
   capability_states: CreateTurnInput['capability_states'];
+  created_at: Date;
 }): TurnSnapshot {
   const threads: Record<string, AgentThreadSnapshot> = input.previousSnapshot
     ? deepCopy(input.previousSnapshot.threads)
@@ -166,6 +173,7 @@ function buildSnapshotFromDelta(input: {
     threads,
     mcp_servers: input.previousSnapshot ? deepCopy(input.previousSnapshot.mcp_servers) : null,
     sandbox_info: input.previousSnapshot ? deepCopy(input.previousSnapshot.sandbox_info) : null,
+    metrics_checkpoint: createInitialTurnMetricsCheckpoint(input.created_at.toISOString()),
   };
 }
 
@@ -430,6 +438,7 @@ export class InMemorySessionStore<
       new_threads: input.new_threads,
       new_context_appends: input.new_context_appends,
       capability_states: input.capability_states,
+      created_at: input.turn.created_at,
     });
 
     const turnRecord: TurnRecord<TTurnCustom> = {
@@ -458,12 +467,26 @@ export class InMemorySessionStore<
     const turn = this.requireTurn(input.session_id, input.turn_id);
 
     if (isNonTerminalTurnState(turn.state)) {
-      const cancelledState: TerminalTurnState = {
-        status: 'cancelled',
+      const completed_at = new Date().toISOString();
+      const folded = foldTurnMetricsCheckpoint({
+        stored: resolveStoredTurnMetricsCheckpoint({
+          checkpoint: turn.snapshot,
+          state: turn.state,
+          created_at: turn.created_at,
+        }),
+        transition: {
+          kind: 'freeze',
+          completed_at,
+          stored_status: turn.state.status,
+        },
+      });
+      const cancelledState = cancelledStateWithCheckpointMetrics({
         reason: input.reason,
-        completed_at: new Date().toISOString(),
-      };
+        completed_at,
+        public_metrics: folded.public_metrics,
+      });
       turn.state = cancelledState;
+      turn.snapshot.metrics_checkpoint = deepCopy(folded.checkpoint);
       turn.updated_at = new Date();
       const list = this.events.get(tKey);
       if (list) {
@@ -472,8 +495,9 @@ export class InMemorySessionStore<
       this.applyTurnStateToSession({
         id: input.session_id,
         turn_id: input.turn_id,
-        turn_created_at: turn.created_at,
         turn_state: cancelledState,
+        duration_ms: folded.duration_ms,
+        cost_delta: folded.cost_delta,
       });
     }
 
@@ -531,14 +555,36 @@ export class InMemorySessionStore<
     if (!list) {
       throw new TurnNotFoundError(input.turn_id);
     }
+    if (input.accounting.status !== input.state.status) {
+      throw new SessionStoreInvariantError(
+        `accounting status ${input.accounting.status} does not match state ${input.state.status} for turn ${input.turn_id}`,
+      );
+    }
+    const folded = foldTurnMetricsCheckpoint({
+      stored: resolveStoredTurnMetricsCheckpoint({
+        checkpoint: turn.snapshot,
+        state: turn.state,
+        created_at: turn.created_at,
+      }),
+      transition:
+        input.accounting.status === 'paused'
+          ? {
+              kind: 'pause',
+              observed_at: input.accounting.observed_at,
+              metrics: input.accounting.metrics,
+            }
+          : { kind: 'resume', observed_at: input.accounting.observed_at },
+    });
     turn.state = deepCopy(input.state);
+    turn.snapshot.metrics_checkpoint = deepCopy(folded.checkpoint);
     turn.updated_at = new Date();
     list.push(deepCopy(input.turn_update_event));
     this.applyTurnStateToSession({
       id: input.session_id,
       turn_id: input.turn_id,
-      turn_created_at: turn.created_at,
       turn_state: input.state,
+      duration_ms: folded.duration_ms,
+      cost_delta: folded.cost_delta,
     });
   }
 
@@ -552,14 +598,31 @@ export class InMemorySessionStore<
     if (!list) {
       throw new TurnNotFoundError(input.turn_id);
     }
+    const storedStatus = turn.state.status;
+    const folded = foldTurnMetricsCheckpoint({
+      stored: resolveStoredTurnMetricsCheckpoint({
+        checkpoint: turn.snapshot,
+        state: turn.state,
+        created_at: turn.created_at,
+      }),
+      transition: {
+        kind: 'terminal',
+        completed_at: input.state.completed_at,
+        stored_status: storedStatus,
+        metrics: input.metrics,
+        reported_cost: input.state.metrics?.total_cost_in_usd,
+      },
+    });
     turn.state = deepCopy(input.state);
+    turn.snapshot.metrics_checkpoint = deepCopy(folded.checkpoint);
     turn.updated_at = new Date();
     list.push(deepCopy(input.turn_done_event));
     this.applyTurnStateToSession({
       id: input.session_id,
       turn_id: input.turn_id,
-      turn_created_at: turn.created_at,
       turn_state: input.state,
+      duration_ms: folded.duration_ms,
+      cost_delta: folded.cost_delta,
     });
   }
 
@@ -660,21 +723,20 @@ export class InMemorySessionStore<
     }
   }
 
-  /** Terminal states fold cost and duration; last_turn_details moves only for the session's last turn. */
+  /** Folds the closed interval and cost delta. last_turn_details moves only for the session's last turn. */
   private applyTurnStateToSession(input: {
     id: string;
     turn_id: string;
-    turn_created_at: Date;
     turn_state: TurnState;
+    duration_ms: number;
+    cost_delta: number | undefined;
   }): void {
     const stored = this.requireSession(input.id);
-    if (!isNonTerminalTurnState(input.turn_state)) {
-      const elapsed_ms = Date.parse(input.turn_state.completed_at) - input.turn_created_at.getTime();
-      const turnCost = input.turn_state.metrics?.total_cost_in_usd;
-      if (turnCost !== undefined) {
-        stored.record.metrics.total_cost_in_usd = (stored.record.metrics.total_cost_in_usd ?? 0) + turnCost;
-      }
-      stored.record.metrics.total_duration_ms += elapsed_ms > 0 ? Math.trunc(elapsed_ms) : 0;
+    if (input.duration_ms > 0) {
+      stored.record.metrics.total_duration_ms += input.duration_ms;
+    }
+    if (input.cost_delta !== undefined) {
+      stored.record.metrics.total_cost_in_usd = (stored.record.metrics.total_cost_in_usd ?? 0) + input.cost_delta;
     }
     if (stored.record.last_turn_details?.id === input.turn_id) {
       stored.record.last_turn_details = SessionLastTurnDetailsSchema.parse({

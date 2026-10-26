@@ -6,6 +6,7 @@ import {
   UserToolApprovalMessageSchema,
   UserToolResponseMessageSchema,
 } from '../../core/events/schema';
+import { AgentThreadMetricsSchema } from '../../core/runtime/metrics';
 
 export enum CancellationReason {
   // AbortController.abort() reason for the max-execution timer.
@@ -169,12 +170,34 @@ export const CreateTurnRequestSchema = z
   })
   .openapi('CreateTurnRequest');
 
+/** Cumulative usage and the open running interval. `running_since` is null while paused. */
+export const TurnMetricsCheckpointSchema = z.object({
+  metrics: AgentThreadMetricsSchema,
+  active_duration_ms: z.number().int().nonnegative(),
+  running_since: z.string().nullable(),
+});
+
+/** Pause sends the cumulative. Resume only opens the next running interval. */
+export const TurnNonTerminalAccountingSchema = z.discriminatedUnion('status', [
+  z.object({
+    status: z.literal('paused'),
+    observed_at: z.string(),
+    metrics: AgentThreadMetricsSchema,
+  }),
+  z.object({
+    status: z.literal('running'),
+    observed_at: z.string(),
+  }),
+]);
+
 export type Turn = z.infer<typeof TurnSchema>;
 export type LegacyTurnInputItem = z.infer<typeof LegacyTurnInputItemSchema>;
 export type TurnState = z.infer<typeof TurnStateSchema>;
 export type NonTerminalTurnState = Extract<TurnState, { status: 'running' | 'paused' }>;
 export type TerminalTurnState = Exclude<TurnState, NonTerminalTurnState>;
 export type TurnMetrics = z.infer<typeof TurnMetricsSchema>;
+export type TurnMetricsCheckpoint = z.infer<typeof TurnMetricsCheckpointSchema>;
+export type TurnNonTerminalAccounting = z.infer<typeof TurnNonTerminalAccountingSchema>;
 
 export function isNonTerminalTurnState(state: TurnState): state is NonTerminalTurnState {
   return state.status === 'running' || state.status === 'paused';
