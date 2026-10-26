@@ -75,6 +75,45 @@ describe('withSessionCache', () => {
     expect(listSessions).toHaveBeenCalledTimes(5);
   });
 
+  it('refreshes session lists when a turn stream starts and ends', async () => {
+    const listSessions = vi.fn().mockResolvedValue(emptyPage);
+    const server = cachedServer({
+      listSessions,
+      createTurn: vi.fn(() => ({
+        async *[Symbol.asyncIterator]() {
+          const createdAt = '2026-01-01T00:00:00Z';
+          yield { sequenceNumber: 1, event: { type: 'turn.created' as const, id: 'e1', turnId: 't1', createdAt } };
+          yield { sequenceNumber: 2, event: { type: 'turn.created' as const, id: 'e2', turnId: 't1', createdAt } };
+        },
+      })),
+    });
+
+    await server.listSessions({ limit: 20 });
+    const stream = server.createTurn({ sessionId: 's1' })[Symbol.asyncIterator]();
+    await stream.next();
+    await server.listSessions({ limit: 20 });
+    while (!(await stream.next()).done) {
+      // Drain the turn.
+    }
+    await server.listSessions({ limit: 20 });
+
+    expect(listSessions).toHaveBeenCalledTimes(3);
+  });
+
+  it('refreshes session lists when a resumed turn ends', async () => {
+    const listSessions = vi.fn().mockResolvedValue(emptyPage);
+    const server = cachedServer({
+      listSessions,
+      subscribeToTurn: vi.fn(() => ({ async *[Symbol.asyncIterator]() {} })),
+    });
+
+    await server.listSessions({ limit: 20 });
+    for await (const data of server.subscribeToTurn?.({ sessionId: 's1', turnId: 't1' }) ?? []) void data;
+    await server.listSessions({ limit: 20 });
+
+    expect(listSessions).toHaveBeenCalledTimes(2);
+  });
+
   it('retries after a failed page instead of replaying the rejection', async () => {
     const listSessions = vi.fn().mockRejectedValueOnce(new Error('boom')).mockResolvedValue(emptyPage);
     const server = cachedServer({ listSessions });
@@ -106,24 +145,25 @@ const idlePage = {
   nextPageToken: 'older',
 };
 const runningPage = {
-  data: [{ turnId: 't2', event: { type: 'model.message.delta' } }],
+  data: [{ turnId: 't2', event: { type: 'model.message' } }],
   nextPageToken: 'older',
 };
 
-function historyServer({ updatedAt = ['2026-01-01T00:00:00Z'], page = idlePage } = {}) {
+function historyServer({ updatedAt = ['2026-01-01T00:00:00Z'], page = idlePage, lastTurnId = 't1' } = {}) {
   const versions = [...updatedAt];
   const getSession = vi.fn(async ({ sessionId }: { sessionId: string }) => ({
     id: sessionId,
     isMutable: true,
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: versions.length > 1 ? (versions.shift() ?? '') : (versions[0] ?? ''),
+    lastTurnId,
   }));
   const listEvents = vi.fn().mockResolvedValue(page);
   const createTurn = vi.fn(() => ({ async *[Symbol.asyncIterator]() {} }));
   const cancelSession = vi.fn().mockResolvedValue(undefined);
   const createSession = vi.fn().mockResolvedValue({ id: 's2' });
   const server = cachedServer({ getSession, listEvents, createTurn, cancelSession, createSession });
-  return { server, getSession, listEvents, createTurn };
+  return { server, getSession, listEvents, createTurn, cancelSession };
 }
 
 async function openSession(server: ReturnType<typeof cachedServer>, sessionId = 's1') {
@@ -182,16 +222,59 @@ describe('withSessionCache history', () => {
     expect(listEvents).toHaveBeenCalledTimes(2);
   });
 
+  it('drops cached history when this client cancels a turn', async () => {
+    const { server, listEvents } = historyServer();
+
+    await openSession(server);
+    await server.cancelSession({ sessionId: 's1' });
+    await openSession(server);
+
+    expect(listEvents).toHaveBeenCalledTimes(2);
+  });
+
+  it('refetches a session that finished after it was opened mid-turn', async () => {
+    const { server, listEvents } = historyServer();
+    listEvents.mockResolvedValueOnce(runningPage);
+
+    await openSession(server);
+    const afterFinish = await openSession(server);
+    await openSession(server);
+
+    expect(afterFinish).toEqual(idlePage);
+    expect(listEvents).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not cache an idle tip that is not the session last turn', async () => {
+    // Turn t2 is already the last turn but has not written `turn.created` yet.
+    const { server, listEvents } = historyServer({ lastTurnId: 't2' });
+
+    await openSession(server);
+    await openSession(server);
+
+    expect(listEvents).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps older pages cached across session versions', async () => {
     const { server, listEvents } = historyServer({
       updatedAt: ['2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z'],
     });
 
+    await openSession(server);
     await server.listEvents({ sessionId: 's1', limit: 50, pageToken: 'older' });
     await server.getSession({ sessionId: 's1' });
     await server.listEvents({ sessionId: 's1', limit: 50, pageToken: 'older' });
 
-    expect(listEvents).toHaveBeenCalledTimes(1);
+    expect(listEvents).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not cache older pages paged from a running tip', async () => {
+    const { server, listEvents } = historyServer({ page: runningPage });
+
+    await openSession(server);
+    await server.listEvents({ sessionId: 's1', limit: 50, pageToken: 'older' });
+    await server.listEvents({ sessionId: 's1', limit: 50, pageToken: 'older' });
+
+    expect(listEvents).toHaveBeenCalledTimes(3);
   });
 
   it('keeps history across new chats', async () => {

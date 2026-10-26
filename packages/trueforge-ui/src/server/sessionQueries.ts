@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query';
 
 import { queryKeys } from './queryKeys.js';
-import type { AgentUIServer, ListSessionsParams } from './types.js';
+import type { AgentUIServer, ListSessionsParams, TurnStreamData } from './types.js';
 
 // `startTimestamp` is a rolling "now − 1 year" that differs on every call;
 // keying on it would make each request unique and defeat the cache.
@@ -37,28 +37,50 @@ const SESSION_VERSION_MAX_AGE_MS = 30_000;
 
 type SessionEventsPage = Awaited<ReturnType<AgentUIServer['listEvents']>>;
 
+type SessionDetail = Awaited<ReturnType<AgentUIServer['getSession']>>;
+
 /**
  * Session `updatedAt` moves when a turn starts or the session changes, but not while a running
  * turn appends events, so it versions the newest history page only once the session is idle.
  */
-function sessionHistoryVersion({
+function confirmedSession({
   queryClient,
   sessionId,
 }: {
   queryClient: QueryClient;
   sessionId: string;
-}): string | undefined {
-  const state = queryClient.getQueryState<Awaited<ReturnType<AgentUIServer['getSession']>>>(
-    queryKeys.sessions.detail(sessionId),
-  );
+}): SessionDetail | undefined {
+  const state = queryClient.getQueryState<SessionDetail>(queryKeys.sessions.detail(sessionId));
   if (state?.data == null || state.isInvalidated) return undefined;
   if (Date.now() - state.dataUpdatedAt > SESSION_VERSION_MAX_AGE_MS) return undefined;
-  return state.data.updatedAt;
+  return state.data;
 }
 
-/** A running turn keeps appending events without bumping `updatedAt`; only an idle tip is stable. */
-function endsIdle(page: SessionEventsPage): boolean {
-  return page.data[0]?.event.type === 'turn.done';
+/**
+ * Only a finished tip is stable. A new turn becomes the session's last turn before it writes
+ * `turn.created`, so a page ending on an earlier turn may be missing it.
+ */
+function endsOnFinishedLastTurn({ page, session }: { page: SessionEventsPage; session: SessionDetail }): boolean {
+  const newest = page.data[0];
+  return newest?.event.type === 'turn.done' && newest.turnId === session.lastTurnId;
+}
+
+/**
+ * Older-page tokens are offsets from the newest turn they were paged from, so they only hold
+ * still once that turn finished, which is true for tokens minted by an already cached page.
+ */
+function isStablePageToken({
+  queryClient,
+  sessionId,
+  pageToken,
+}: {
+  queryClient: QueryClient;
+  sessionId: string;
+  pageToken: string;
+}): boolean {
+  return queryClient
+    .getQueriesData<SessionEventsPage>({ queryKey: queryKeys.sessionHistory.session(sessionId) })
+    .some(([, page]) => page?.nextPageToken === pageToken);
 }
 
 /**
@@ -72,8 +94,23 @@ export function withSessionCache({
   server: AgentUIServer;
   queryClient: QueryClient;
 }): AgentUIServer {
-  const { deleteSession, renameSession } = server;
+  const { deleteSession, renameSession, subscribeToTurn } = server;
   const invalidateSessions = () => queryClient.invalidateQueries({ queryKey: queryKeys.sessions.all() });
+  // A turn reorders session lists when it starts and updates titles and metrics when it ends.
+  async function* refreshSessionsAround(stream: AsyncIterable<TurnStreamData>): AsyncIterable<TurnStreamData> {
+    let started = false;
+    try {
+      for await (const data of stream) {
+        if (!started) {
+          started = true;
+          void invalidateSessions();
+        }
+        yield data;
+      }
+    } finally {
+      void invalidateSessions();
+    }
+  }
   const forgetSession = (sessionId: string) => {
     queryClient.removeQueries({ queryKey: queryKeys.sessions.detail(sessionId) });
     queryClient.removeQueries({ queryKey: queryKeys.sessionHistory.session(sessionId) });
@@ -92,13 +129,18 @@ export function withSessionCache({
     },
     async listEvents(request) {
       const { sessionId, pageToken, lastTurnId, limit } = request;
-      const isOlderPage = pageToken != null && pageToken !== '';
-      // Older pages are immutable; the newest page is valid only for the session version just read.
-      const version = isOlderPage ? undefined : sessionHistoryVersion({ queryClient, sessionId });
-      if (!isOlderPage && version === undefined) return server.listEvents(request);
+      const olderPageToken = pageToken != null && pageToken !== '' ? pageToken : undefined;
+      // The newest page is valid only for the session version just read.
+      const session = olderPageToken === undefined ? confirmedSession({ queryClient, sessionId }) : undefined;
+      const version = session?.updatedAt;
+      const cacheable =
+        olderPageToken === undefined
+          ? session !== undefined
+          : isStablePageToken({ queryClient, sessionId, pageToken: olderPageToken });
+      if (!cacheable) return server.listEvents(request);
       const queryKey = queryKeys.sessionHistory.page({
         sessionId,
-        ...(isOlderPage ? { pageToken } : {}),
+        ...(olderPageToken === undefined ? {} : { pageToken: olderPageToken }),
         ...(lastTurnId === undefined ? {} : { lastTurnId }),
         ...(limit === undefined ? {} : { limit }),
         ...(version === undefined ? {} : { version }),
@@ -109,13 +151,21 @@ export function withSessionCache({
         staleTime: Infinity,
         gcTime: SESSION_HISTORY_GC_TIME_MS,
       });
-      if (!isOlderPage && !endsIdle(page)) queryClient.removeQueries({ queryKey, exact: true });
+      if (session !== undefined && !endsOnFinishedLastTurn({ page, session })) {
+        queryClient.removeQueries({ queryKey, exact: true });
+      }
       return page;
     },
     createTurn(request) {
       forgetSession(request.sessionId);
-      return server.createTurn(request);
+      return refreshSessionsAround(server.createTurn(request));
     },
+    ...(subscribeToTurn != null
+      ? {
+          subscribeToTurn: (request: Parameters<NonNullable<AgentUIServer['subscribeToTurn']>>[0]) =>
+            refreshSessionsAround(subscribeToTurn.call(server, request)),
+        }
+      : {}),
     async cancelSession(request) {
       forgetSession(request.sessionId);
       await server.cancelSession(request);

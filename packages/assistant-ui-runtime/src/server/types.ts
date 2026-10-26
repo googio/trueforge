@@ -187,6 +187,8 @@ export interface Session<TSpec extends AgentSpec = AgentSpec> {
   metrics?: SessionListMetrics;
   createdAt: string;
   updatedAt: string;
+  /** Most recent turn when the host reports it; absent before the first turn. */
+  lastTurnId?: string;
   /** Arbitrary caller key-value metadata strings. */
   metadata?: Record<string, string>;
 }

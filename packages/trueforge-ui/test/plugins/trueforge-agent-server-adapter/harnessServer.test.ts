@@ -326,6 +326,22 @@ describe('createHarnessChatServer', () => {
     });
   });
 
+  it('getSession reports the last turn id from the wire', async () => {
+    const fetchWithTurn: typeof fetch = async input => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith('/api/v1/sessions/ses_1')) {
+        return Response.json({
+          data: { ...session, last_turn_details: { id: 'trn_2', state: { status: 'done' } } },
+        });
+      }
+      return new Response(`Unexpected request: ${url}`, { status: 500 });
+    };
+
+    const found = await createHarnessChatServer({ fetch: fetchWithTurn }).getSession({ sessionId: 'ses_1' });
+
+    assert.equal(found.lastTurnId, 'trn_2');
+  });
+
   it('getSession leaves a ref session unlabelled when it carries no name snapshot', async () => {
     const fetchNamed: typeof fetch = async input => {
       const url = input instanceof Request ? input.url : String(input);
