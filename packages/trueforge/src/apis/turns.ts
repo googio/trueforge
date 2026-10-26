@@ -80,7 +80,12 @@ import {
   subscribeTurnRoute,
 } from '../routes/turnRoutes';
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
-import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
+import {
+  StreamGoneError,
+  StreamOwnerMismatchError,
+  type EventSubscription,
+  type EventSubscriptionRegistry,
+} from '../runtime/event-subscription';
 import { validateSandboxFilePath } from '../runtime/sandboxFilePath';
 import {
   buildTurnSandbox,
@@ -89,6 +94,7 @@ import {
   resolveSandboxEnvironment,
   resolveSandboxProvider,
 } from '../runtime/sessionResources';
+import { repairTurnEventLog } from '../runtime/turnEventLogRepair';
 import { DEFAULT_SANDBOX_ENVIRONMENT_NAME } from '../schemas/sandboxEnvironment';
 import { MAX_SESSION_TITLE_LENGTH } from '../schemas/session';
 import { assertGatewayMetadataRequestHeaders } from '../truefoundry/gatewayMetadata';
@@ -216,8 +222,10 @@ export type BeginTurnExecutionDeps<TTransaction> = Pick<
   sandboxProviderStore: ISandboxProviderStore;
   webSearchProviderStore: IWebSearchProviderStore;
   skillStore: Pick<ISkillStore, 'resolveTurnSkills'>;
-  /** Loads the previous turn when create must cancel a run that is not in this process. */
-  sessionStore: Pick<ISessionStore, 'getTurn'>;
+  /**
+   * Previous-turn cancel, durable sequence numbers, and rebuilding a missing event stream.
+   */
+  sessionStore: Pick<ISessionStore, 'getTurn' | 'listTurnEventLog' | 'assignTurnEventSequenceNumbers'>;
   redis?: RedisClient | undefined;
 };
 
@@ -499,21 +507,54 @@ interface TurnExecutionTimeout {
   clear: () => void;
 }
 
+async function recordPersistedEventSequence(input: {
+  sessionStore: Pick<ISessionStore, 'assignTurnEventSequenceNumbers'>;
+  sessionId: string;
+  turnId: string;
+  executorId: string;
+  event: TurnStreamingEvent;
+  sequenceNumber: number;
+}): Promise<void> {
+  if (input.event.type === EventType.MODEL_MESSAGE_DELTA) {
+    return;
+  }
+  await input.sessionStore.assignTurnEventSequenceNumbers({
+    session_id: input.sessionId,
+    turn_id: input.turnId,
+    active_executor_id: input.executorId,
+    assignments: [{ event_id: input.event.id, sequence_number: input.sequenceNumber }],
+  });
+}
+
 export async function drainTurnEvents(input: {
   trackedStream: AsyncIterable<TurnStreamingEvent>;
   turnEventStream: EventSubscription<TurnStreamingEvent>;
   executionTimeout: TurnExecutionTimeout;
   logger: Logger;
   pausedKeepalive: TurnPausedKeepalive;
+  executorId: string;
+  /** Writes the sequence put just assigned onto the durable event row. */
+  recordSequence: (event: TurnStreamingEvent, sequenceNumber: number) => Promise<void>;
   onEvent?: (event: TurnStreamingEvent, sequenceNumber: number) => Promise<void>;
 }): Promise<void> {
-  const { trackedStream, turnEventStream, executionTimeout, logger, pausedKeepalive, onEvent } = input;
+  const {
+    trackedStream,
+    turnEventStream,
+    executionTimeout,
+    logger,
+    pausedKeepalive,
+    executorId,
+    recordSequence,
+    onEvent,
+  } = input;
   try {
     for await (const event of trackedStream) {
       // Dual-write before any client sink so subscribers can resume after disconnect.
       const sequenceNumber = await turnEventStream.put(event, {
         streamTTLSeconds: streamTTLSecondsFor(event),
+        executorId,
       });
+      await recordSequence(event, sequenceNumber);
       if (event.type === EventType.TURN_UPDATE) {
         if (event.state.status === 'paused') {
           pausedKeepalive.start();
@@ -526,8 +567,15 @@ export async function drainTurnEvents(input: {
       await onEvent?.(event, sequenceNumber);
     }
   } catch (error) {
-    if (error instanceof SessionStoreNotFoundError) {
-      logger.warn('Turn stream ended after session/turn was removed', extractErrorLogFields(error));
+    if (
+      error instanceof SessionStoreNotFoundError ||
+      error instanceof TurnOwnershipLostError ||
+      error instanceof StreamOwnerMismatchError
+    ) {
+      logger.warn(
+        'Turn stream ended after session/turn was removed or ownership was lost',
+        extractErrorLogFields(error),
+      );
     } else {
       logger.error('Unexpected error in turn event drain', extractErrorLogFields(error));
     }
@@ -543,6 +591,8 @@ export interface TurnEventDrainInput {
   executionTimeout: TurnExecutionTimeout;
   logger: Logger;
   pausedKeepalive: TurnPausedKeepalive;
+  executorId: string;
+  recordSequence: (event: TurnStreamingEvent, sequenceNumber: number) => Promise<void>;
 }
 
 /**
@@ -665,7 +715,7 @@ export async function beginTurnExecution<TTransaction>(
     turn,
   });
 
-  // Held for the whole turn; the stream's sequence counter dies with it.
+  // Held for the whole turn. Repair reseeds the counter when this replica resumes.
   const turnEventStream = deps.eventSubscriptions.get(turnStreamId(tenantId, sessionId, turn.id));
 
   return {
@@ -683,6 +733,16 @@ export async function beginTurnExecution<TTransaction>(
           deps.activeTurns.clearPausedKeepalive({ sessionId, turnId: turn.id });
         },
       },
+      executorId: configuration.EXECUTOR_ID,
+      recordSequence: (event, sequenceNumber) =>
+        recordPersistedEventSequence({
+          sessionStore: deps.sessionStore,
+          sessionId,
+          turnId: turn.id,
+          executorId: configuration.EXECUTOR_ID,
+          event,
+          sequenceNumber,
+        }),
     },
   };
 }
@@ -724,8 +784,8 @@ function cancellationReason(reason: unknown): CancellationReason {
 }
 
 /**
- * Rebuild a paused turn this replica owns, reseed the event-stream counter from
- * the existing tail, and drain in the background. Inbox replay happens inside rebuild.
+ * Rebuild a paused turn this replica owns, repair the event stream from the
+ * durable log, and drain in the background. Inbox replay happens inside rebuild.
  */
 async function resumePausedTurn<TTransaction>(input: {
   session: SessionHandle<TTransaction>;
@@ -792,8 +852,14 @@ async function resumePausedTurn<TTransaction>(input: {
     turnStreamId(input.session.tenant_id, input.session.session_id, turn.id),
   );
   try {
-    // Counter only. A missing stream stays at 1; log repair from the TurnRecord is later.
-    await turnEventStream.resumeProducer({ streamTTLSeconds: configuration.TURN_STREAM_TTL_SECONDS });
+    await repairTurnEventLog({
+      sessionStore: input.deps.sessionStore,
+      subscription: turnEventStream,
+      sessionId: input.session.session_id,
+      turnId: turn.id,
+      streamTTLSeconds: configuration.TURN_STREAM_TTL_SECONDS,
+      producerExecutorId: configuration.EXECUTOR_ID,
+    });
   } catch (error) {
     input.deps.logger.warn('Paused turn stream resume failed', extractErrorLogFields(error));
     executionTimeout.clear();
@@ -832,6 +898,16 @@ async function resumePausedTurn<TTransaction>(input: {
         turnEventStream,
         executionTimeout,
         logger: input.deps.logger,
+        executorId: configuration.EXECUTOR_ID,
+        recordSequence: (event, sequenceNumber) =>
+          recordPersistedEventSequence({
+            sessionStore: input.deps.sessionStore,
+            sessionId: input.session.session_id,
+            turnId: turn.id,
+            executorId: configuration.EXECUTOR_ID,
+            event,
+            sequenceNumber,
+          }),
         pausedKeepalive: {
           start: () => {
             input.deps.activeTurns.startPausedKeepalive({
@@ -1950,8 +2026,16 @@ export function createTurnsRouter<TTransaction>(deps: TurnsRouterDeps<TTransacti
 
     const turnEventStream = deps.eventSubscriptions.get(turnStreamId(requestContext.tenant_id, sessionId, turnId));
 
-    // Admission check before SSE headers are sent, so it can still map to HTTP 412.
+    // Read-only log repair. Does not claim the stream owner or start execute.
+    // A stream that is still missing after repair (nothing durable to replay) is 412.
     try {
+      await repairTurnEventLog({
+        sessionStore: deps.sessionStore,
+        subscription: turnEventStream,
+        sessionId,
+        turnId,
+        streamTTLSeconds: configuration.TURN_STREAM_TTL_SECONDS,
+      });
       await turnEventStream.assertSubscribable();
     } catch (error) {
       if (error instanceof StreamGoneError) {
