@@ -69,7 +69,7 @@ describe('TrueFoundryServiceFoundryServerClient.peekUsers', () => {
   it('looks users up by id', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ users: [], totalUsers: 0 }));
 
-    await createClient().peekUsers({ accessToken: 'caller-token', ids: ['u1', 'u2'], limit: 2, offset: 0 });
+    await createClient().peekUsers({ accessToken: 'caller-token', ids: ['u1', 'u2'] });
 
     const url = requestedUrl();
     expect(JSON.parse(url.searchParams.get('filter') ?? '')).toEqual({
@@ -78,8 +78,8 @@ describe('TrueFoundryServiceFoundryServerClient.peekUsers', () => {
         { subjectType: 'user', subjectId: 'u2' },
       ],
     });
-    expect(url.searchParams.get('limit')).toBe('2');
-    expect(url.searchParams.get('offset')).toBe('0');
+    expect(url.searchParams.has('limit')).toBe(false);
+    expect(url.searchParams.has('offset')).toBe(false);
   });
 
   it('fails with 424 on a malformed response', async () => {

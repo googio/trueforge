@@ -53,6 +53,7 @@ describe('public CRUD after session deletion', () => {
         sessionStore,
         accessControlEntryStore: new SqliteAccessControlEntryStore(db),
         userStore: new EmptyUserStore(),
+        withTransaction: callback => db.transaction().execute(callback),
         activeTurns,
         resolveModelProviderStore: () => modelProviderStore,
         resolveMcpServerStore: () => mcpServerStore,

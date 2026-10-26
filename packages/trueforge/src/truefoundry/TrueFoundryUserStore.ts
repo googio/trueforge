@@ -41,7 +41,7 @@ export class TrueFoundryUserStore implements IUserStore {
     const found: User[] = [];
     for (let i = 0; i < ids.length; i += PEEK_IDS_CHUNK_SIZE) {
       const chunk = ids.slice(i, i + PEEK_IDS_CHUNK_SIZE);
-      const { users } = await this.#client.peekUsers({ accessToken, ids: chunk, limit: chunk.length, offset: 0 });
+      const { users } = await this.#client.peekUsers({ accessToken, ids: chunk });
       found.push(...users.map(toUser));
     }
     return found;

@@ -28,7 +28,8 @@ export interface GrantSessionAccessInput {
 export interface RevokeSessionAccessInput {
   tenant_id: string;
   session_id: string;
-  subject: SessionGrantSubject;
+  /** Non-empty and de-duplicated by the caller. */
+  subjects: SessionGrantSubject[];
 }
 
 export interface IAccessControlEntryStore<TTransaction = never> {
@@ -39,6 +40,6 @@ export interface IAccessControlEntryStore<TTransaction = never> {
    * untouched. Rejects when the session does not exist.
    */
   grantSessionAccess(input: GrantSessionAccessInput, transaction?: TTransaction): Promise<void>;
-  /** Deletes one subject's entry; false when it did not exist. */
-  revokeSessionAccess(input: RevokeSessionAccessInput, transaction?: TTransaction): Promise<boolean>;
+  /** Deletes the subjects' entries in one statement; subjects without an entry are ignored. */
+  revokeSessionAccess(input: RevokeSessionAccessInput, transaction?: TTransaction): Promise<void>;
 }

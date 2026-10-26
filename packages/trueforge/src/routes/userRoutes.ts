@@ -13,7 +13,8 @@ export const listUsersRoute = createRoute({
   path: '/',
   tags: [OpenApiTag.USERS],
   summary: 'List users',
-  description: 'List users in the tenant that sessions can be shared with. Searches email and display name.',
+  description:
+    'List users in the tenant that sessions can be shared with. Searches email and display name, or looks up specific users with `ids`.',
   'x-fern-sdk-group-name': ['users'],
   'x-fern-sdk-method-name': 'list',
   'x-fern-pagination': TOKEN_PAGINATION,

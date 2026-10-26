@@ -2,7 +2,7 @@
 import { z } from '@hono/zod-openapi';
 import { CreatedBySubjectSchema } from '@truefoundry/trueforge-core/agent-session';
 
-const SESSION_ACCESS_MAX_SUBJECTS_PER_REQUEST = 50;
+const SESSION_GRANT_MAX_SUBJECTS_PER_LIST = 50;
 
 export const SessionGrantSubjectTypeSchema = z
   .enum(['user'])
@@ -31,25 +31,26 @@ export const ListSessionGrantsResponseSchema = z
   .object({ data: z.array(SessionGrantSchema) })
   .openapi('ListSessionGrantsResponse');
 
-export const CreateSessionGrantsRequestSchema = z
+export const UpdateSessionGrantsRequestSchema = z
   .object({
-    subjects: z
+    grant: z
       .array(SessionGrantSubjectSchema)
-      .min(1)
-      .max(SESSION_ACCESS_MAX_SUBJECTS_PER_REQUEST)
-      .describe(`Subjects to share the session with (1–${String(SESSION_ACCESS_MAX_SUBJECTS_PER_REQUEST)}).`),
+      .max(SESSION_GRANT_MAX_SUBJECTS_PER_LIST)
+      .optional()
+      .default([])
+      .describe(`Subjects to share the session with (up to ${String(SESSION_GRANT_MAX_SUBJECTS_PER_LIST)}).`),
+    revoke: z
+      .array(SessionGrantSubjectSchema)
+      .max(SESSION_GRANT_MAX_SUBJECTS_PER_LIST)
+      .optional()
+      .default([])
+      .describe(`Subjects to remove access for (up to ${String(SESSION_GRANT_MAX_SUBJECTS_PER_LIST)}).`),
   })
   .strict()
-  .openapi('CreateSessionGrantsRequest');
-
-export const DeleteSessionGrantsRequestQuerySchema = z
-  .object({
-    subject_type: SessionGrantSubjectTypeSchema,
-    subject_id: SessionGrantSubjectSchema.shape.subject_id,
+  .refine(body => body.grant.length + body.revoke.length > 0, {
+    message: 'At least one subject to grant or revoke is required.',
   })
-  .openapi('DeleteSessionGrantsRequestQuery');
-
-export const DeleteSessionGrantResponseSchema = z.object({}).strict().openapi('DeleteSessionGrantResponse');
+  .openapi('UpdateSessionGrantsRequest');
 
 export type SessionGrantSubjectType = z.infer<typeof SessionGrantSubjectTypeSchema>;
 export type SessionGrantSubject = z.infer<typeof SessionGrantSubjectSchema>;

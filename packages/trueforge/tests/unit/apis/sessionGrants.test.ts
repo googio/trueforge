@@ -86,6 +86,7 @@ function buildApp(input: { db: Kysely<Database>; sessionStore: SqliteSessionStor
       sessionStore,
       accessControlEntryStore: new SqliteAccessControlEntryStore(db),
       userStore,
+      withTransaction: callback => db.transaction().execute(callback),
       activeTurns: new ActiveTurnRegistry(),
       resolveModelProviderStore: () => new SqliteModelProviderStore(db),
       resolveMcpServerStore: () => new SqliteMcpServerStore(db),
@@ -139,15 +140,19 @@ describe('session grants API', () => {
   async function listSubjectIds(): Promise<string[]> {
     const response = await app.request(`/${SESSION_ID}/grants`, asCaller('owner'));
     expect(response.status).toBe(200);
-    return ListSessionGrantsResponseSchema.parse(await response.json()).data.map(access => access.subject.subject_id);
+    return ListSessionGrantsResponseSchema.parse(await response.json()).data.map(grant => grant.subject.subject_id);
   }
 
-  function userSubjects(subjectIds: string[]) {
-    return { subjects: subjectIds.map(subject_id => ({ subject_type: 'user', subject_id })) };
+  function users(subjectIds: string[]) {
+    return subjectIds.map(subject_id => ({ subject_type: 'user', subject_id }));
   }
 
-  async function share(subjectIds: string[]): Promise<Response> {
-    return app.request(`/${SESSION_ID}/grants`, jsonInit('POST', userSubjects(subjectIds)));
+  async function update(body: unknown, caller = 'owner'): Promise<Response> {
+    return app.request(`/${SESSION_ID}/grants`, jsonInit('POST', body, caller));
+  }
+
+  async function grantedIds(response: Response): Promise<string[]> {
+    return ListSessionGrantsResponseSchema.parse(await response.json()).data.map(grant => grant.subject.subject_id);
   }
 
   describe('access rules', () => {
@@ -158,30 +163,21 @@ describe('session grants API', () => {
       expect(list.status).toBe(403);
       expect(await list.json()).toEqual(forbidden);
 
-      const create = await app.request(`/${SESSION_ID}/grants`, jsonInit('POST', userSubjects(['bob']), 'alice'));
-      expect(create.status).toBe(403);
-
-      const remove = await app.request(
-        `/${SESSION_ID}/grants?subject_type=user&subject_id=bob`,
-        asCaller('alice', 'DELETE'),
-      );
-      expect(remove.status).toBe(403);
+      expect((await update({ grant: users(['bob']) }, 'alice')).status).toBe(403);
+      expect((await update({ revoke: users(['bob']) }, 'alice')).status).toBe(403);
     });
 
     it('returns 404 for an unknown session', async () => {
       expect((await app.request('/missing/grants', asCaller('owner'))).status).toBe(404);
-      expect((await app.request('/missing/grants', jsonInit('POST', userSubjects(['alice'])))).status).toBe(404);
-      expect(
-        (await app.request('/missing/grants?subject_type=user&subject_id=alice', asCaller('owner', 'DELETE'))).status,
-      ).toBe(404);
+      expect((await app.request('/missing/grants', jsonInit('POST', { grant: users(['alice']) }))).status).toBe(404);
     });
   });
 
-  describe('create', () => {
+  describe('grant', () => {
     it('shares with users and returns every subject with access', async () => {
-      const response = await share(['alice', 'bob']);
+      const response = await update({ grant: users(['alice', 'bob']) });
 
-      expect(response.status).toBe(201);
+      expect(response.status).toBe(200);
       const { data } = ListSessionGrantsResponseSchema.parse(await response.json());
       const grantedBy = { subject_id: 'owner', subject_type: 'user', subject_display_name: 'owner' };
       expect(data).toEqual([
@@ -199,25 +195,23 @@ describe('session grants API', () => {
     });
 
     it('collapses duplicates and is idempotent', async () => {
-      expect((await share(['alice', 'alice'])).status).toBe(201);
+      expect((await update({ grant: users(['alice', 'alice']) })).status).toBe(200);
       expect(fakeUserStore.getUsersByIdsCalls[0]).toEqual(['alice']);
 
-      const again = await share(['alice']);
-      expect(again.status).toBe(201);
-      expect(
-        ListSessionGrantsResponseSchema.parse(await again.json()).data.map(access => access.subject.subject_id),
-      ).toEqual(['alice']);
+      const again = await update({ grant: users(['alice']) });
+      expect(again.status).toBe(200);
+      expect(await grantedIds(again)).toEqual(['alice']);
     });
 
     it('rejects sharing with the session creator', async () => {
-      const response = await share(['owner']);
+      const response = await update({ grant: users(['owner']) });
 
       expect(response.status).toBe(422);
       expect(await response.json()).toEqual({ error: { message: 'The session creator already has access.' } });
     });
 
     it('rejects unknown users without writing anything', async () => {
-      const response = await share(['alice', 'ghost', 'phantom']);
+      const response = await update({ grant: users(['alice', 'ghost', 'phantom']) });
 
       expect(response.status).toBe(422);
       expect(await response.json()).toEqual({ error: { message: 'Unknown users: ghost, phantom' } });
@@ -227,25 +221,93 @@ describe('session grants API', () => {
     it('rejects every user when no user store is configured', async () => {
       app = buildApp({ db, sessionStore, userStore: new EmptyUserStore() });
 
-      const response = await share(['alice']);
+      const response = await update({ grant: users(['alice']) });
 
       expect(response.status).toBe(422);
       expect(await response.json()).toEqual({ error: { message: 'Unknown users: alice' } });
     });
+  });
 
-    it.each([
-      ['an empty subject list', { subjects: [] }],
-      ['more than 50 subjects', userSubjects(Array.from({ length: 51 }, (_, i) => `u${String(i)}`))],
-      ['an unsupported subject type', { subjects: [{ subject_type: 'tenant', subject_id: 'default' }] }],
-    ])('rejects %s', async (_label, body) => {
-      const response = await app.request(`/${SESSION_ID}/grants`, jsonInit('POST', body));
-      expect(response.status).toBe(400);
+  describe('revoke', () => {
+    it('removes several subjects in one call and ignores ones without access', async () => {
+      expect((await update({ grant: users(['alice', 'bob']) })).status).toBe(200);
+
+      const response = await update({ revoke: users(['alice', 'alice', 'nobody']) });
+
+      expect(response.status).toBe(200);
+      expect(await grantedIds(response)).toEqual(['bob']);
     });
+
+    it('does not look up users that are only being revoked', async () => {
+      app = buildApp({ db, sessionStore, userStore: new EmptyUserStore() });
+
+      const response = await update({ revoke: users(['alice']) });
+
+      expect(response.status).toBe(200);
+      expect(await grantedIds(response)).toEqual([]);
+    });
+  });
+
+  describe('grant and revoke together', () => {
+    it('applies both lists in one request', async () => {
+      expect((await update({ grant: users(['alice']) })).status).toBe(200);
+
+      const response = await update({ grant: users(['bob']), revoke: users(['alice']) });
+
+      expect(response.status).toBe(200);
+      expect(await grantedIds(response)).toEqual(['bob']);
+    });
+
+    it('writes nothing when a subject to grant is invalid', async () => {
+      expect((await update({ grant: users(['alice']) })).status).toBe(200);
+
+      const response = await update({ grant: users(['ghost']), revoke: users(['alice']) });
+
+      expect(response.status).toBe(422);
+      expect(await listSubjectIds()).toEqual(['alice']);
+    });
+
+    it('rejects a subject that is both granted and revoked', async () => {
+      const response = await update({ grant: users(['alice']), revoke: users(['alice']) });
+
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({ error: { message: 'A subject cannot be both granted and revoked.' } });
+      expect(await listSubjectIds()).toEqual([]);
+    });
+
+    it('accepts up to 50 subjects in each list', async () => {
+      fakeUserStore = new FakeUserStore(
+        Array.from({ length: 50 }, (_, i) => ({
+          id: `u${String(i)}`,
+          display_name: `U${String(i)}`,
+          email: `u${String(i)}@x`,
+        })),
+      );
+      app = buildApp({ db, sessionStore, userStore: fakeUserStore });
+      const fifty = Array.from({ length: 50 }, (_, i) => `u${String(i)}`);
+      const fiftyOthers = Array.from({ length: 50 }, (_, i) => `v${String(i)}`);
+
+      const response = await update({ grant: users(fifty), revoke: users(fiftyOthers) });
+
+      expect(response.status).toBe(200);
+      expect(await grantedIds(response)).toHaveLength(50);
+    });
+  });
+
+  it.each([
+    ['an empty body', {}],
+    ['two empty lists', { grant: [], revoke: [] }],
+    ['more than 50 subjects to grant', { grant: users(Array.from({ length: 51 }, (_, i) => `u${String(i)}`)) }],
+    ['more than 50 subjects to revoke', { revoke: users(Array.from({ length: 51 }, (_, i) => `u${String(i)}`)) }],
+    ['an unsupported subject type', { grant: [{ subject_type: 'tenant', subject_id: 'default' }] }],
+    ['an unknown field', { subjects: users(['alice']) }],
+  ])('rejects %s', async (_label, body) => {
+    expect((await update(body)).status).toBe(400);
   });
 
   describe('list', () => {
     it('lists subjects without looking up users', async () => {
-      expect((await share(['alice'])).status).toBe(201);
+      expect((await update({ grant: users(['alice']) })).status).toBe(200);
       const callsAfterShare = fakeUserStore.getUsersByIdsCalls.length;
 
       const response = await app.request(`/${SESSION_ID}/grants`, asCaller('owner'));
@@ -258,54 +320,8 @@ describe('session grants API', () => {
     });
   });
 
-  describe('delete', () => {
-    it('revokes an existing subject', async () => {
-      expect((await share(['alice', 'bob'])).status).toBe(201);
-
-      const response = await app.request(
-        `/${SESSION_ID}/grants?subject_type=user&subject_id=alice`,
-        asCaller('owner', 'DELETE'),
-      );
-
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({});
-      expect(await listSubjectIds()).toEqual(['bob']);
-    });
-
-    it('returns 404 when the subject does not have access', async () => {
-      const response = await app.request(
-        `/${SESSION_ID}/grants?subject_type=user&subject_id=alice`,
-        asCaller('owner', 'DELETE'),
-      );
-
-      expect(response.status).toBe(404);
-      expect(await response.json()).toEqual({ error: { message: 'Subject does not have access to this session.' } });
-    });
-
-    it('rejects an unsupported subject type', async () => {
-      expect(
-        (await app.request(`/${SESSION_ID}/grants?subject_type=tenant&subject_id=default`, asCaller('owner', 'DELETE')))
-          .status,
-      ).toBe(400);
-    });
-
-    it.each([
-      ['no query parameters', ''],
-      ['a missing subject_id', '?subject_type=user'],
-      ['a missing subject_type', '?subject_id=alice'],
-      ['an empty subject_id', '?subject_type=user&subject_id='],
-    ])('rejects %s without revoking anything', async (_label, query) => {
-      expect((await share(['alice'])).status).toBe(201);
-
-      const response = await app.request(`/${SESSION_ID}/grants${query}`, asCaller('owner', 'DELETE'));
-
-      expect(response.status).toBe(400);
-      expect(await listSubjectIds()).toEqual(['alice']);
-    });
-  });
-
-  it('does not yet give users with access read access', async () => {
-    expect((await share(['alice'])).status).toBe(201);
+  it('does not yet give users with a grant read access', async () => {
+    expect((await update({ grant: users(['alice']) })).status).toBe(200);
 
     expect((await app.request(`/${SESSION_ID}`, asCaller('alice'))).status).toBe(403);
     expect((await app.request(`/${SESSION_ID}/events`, asCaller('alice'))).status).toBe(403);

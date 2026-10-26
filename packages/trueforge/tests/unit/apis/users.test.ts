@@ -4,7 +4,12 @@ import { createLogger } from 'winston';
 import { createUsersRouter } from '../../../src/apis/users';
 import { createAppErrorHandler } from '../../../src/app';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
-import { EmptyUserStore, type IUserStore, type ListUsersInput } from '../../../src/db/userStore';
+import {
+  EmptyUserStore,
+  type GetUsersByIdsInput,
+  type IUserStore,
+  type ListUsersInput,
+} from '../../../src/db/userStore';
 import { ListUsersResponseSchema, type User } from '../../../src/schemas/user';
 
 const USERS: User[] = Array.from({ length: 5 }, (_, i) => ({
@@ -20,11 +25,14 @@ function buildApp(userStore: IUserStore): OpenAPIHono {
   return app;
 }
 
-function pagedUserStore(): { userStore: IUserStore; listUsers: jest.Mock } {
+function pagedUserStore(): { userStore: IUserStore; listUsers: jest.Mock; getUsersByIds: jest.Mock } {
   const listUsers = jest.fn((input: ListUsersInput) =>
     Promise.resolve({ data: USERS.slice(input.offset, input.offset + input.limit), total: USERS.length }),
   );
-  return { userStore: { listUsers, getUsersByIds: () => Promise.resolve([]) }, listUsers };
+  const getUsersByIds = jest.fn((input: GetUsersByIdsInput) =>
+    Promise.resolve(USERS.filter(user => input.ids.includes(user.id))),
+  );
+  return { userStore: { listUsers, getUsersByIds }, listUsers, getUsersByIds };
 }
 
 describe('users API', () => {
@@ -81,5 +89,43 @@ describe('users API', () => {
 
     expect(response.status).toBe(200);
     expect(ListUsersResponseSchema.parse(await response.json())).toEqual({ data: [], pagination: { limit: 25 } });
+  });
+
+  describe('ids', () => {
+    it('looks up the given users and omits unknown ones', async () => {
+      const { userStore, listUsers, getUsersByIds } = pagedUserStore();
+
+      const response = await buildApp(userStore).request('/?ids=u1, ,u3,ghost');
+
+      expect(response.status).toBe(200);
+      expect(getUsersByIds).toHaveBeenCalledWith({ context: STANDALONE_REQUEST_CONTEXT, ids: ['u1', 'u3', 'ghost'] });
+      expect(listUsers).not.toHaveBeenCalled();
+      const body = ListUsersResponseSchema.parse(await response.json());
+      expect(body.data.map(user => user.id)).toEqual(['u1', 'u3']);
+      expect(body.pagination).toEqual({ limit: 3 });
+    });
+
+    it('accepts up to 100 ids', async () => {
+      const { userStore } = pagedUserStore();
+      const ids = Array.from({ length: 100 }, (_, i) => `u${String(i)}`).join(',');
+
+      expect((await buildApp(userStore).request(`/?ids=${ids}`)).status).toBe(200);
+    });
+
+    it.each([
+      ['more than 100 ids', `ids=${Array.from({ length: 101 }, (_, i) => `u${String(i)}`).join(',')}`],
+      ['an empty list', 'ids='],
+      ['only separators', 'ids=,,'],
+      ['a query as well', 'ids=u1&query=ali'],
+      ['a page token as well', `ids=u1&page_token=${encodeOffsetPageToken(2)}`],
+    ])('rejects %s', async (_label, search) => {
+      const { userStore, listUsers, getUsersByIds } = pagedUserStore();
+
+      const response = await buildApp(userStore).request(`/?${search}`);
+
+      expect(response.status).toBe(400);
+      expect(listUsers).not.toHaveBeenCalled();
+      expect(getUsersByIds).not.toHaveBeenCalled();
+    });
   });
 });

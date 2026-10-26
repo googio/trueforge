@@ -44,14 +44,14 @@ describe('TrueFoundryUserStore', () => {
     expect(peekUsers).toHaveBeenCalledWith({ accessToken: 'caller-token', limit: 25, offset: 0 });
   });
 
-  it('looks up de-duplicated ids with an explicit limit', async () => {
+  it('looks up de-duplicated ids without paging', async () => {
     const peekUsers = jest
       .fn()
       .mockResolvedValue({ users: [{ id: 'u1', name: 'Alice', email: 'alice@example.com' }], totalUsers: 1 });
 
     const users = await userStoreWith(peekUsers).getUsersByIds({ context, ids: ['u1', 'u2', 'u1'] });
 
-    expect(peekUsers).toHaveBeenCalledWith({ accessToken: 'caller-token', ids: ['u1', 'u2'], limit: 2, offset: 0 });
+    expect(peekUsers).toHaveBeenCalledWith({ accessToken: 'caller-token', ids: ['u1', 'u2'] });
     expect(users).toEqual([{ id: 'u1', display_name: 'Alice', email: 'alice@example.com' }]);
   });
 

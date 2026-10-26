@@ -685,26 +685,27 @@ export class TrueFoundryServiceFoundryServerClient {
 
   /**
    * `GET v1/subjects/peek` for active tenant users, with the caller's token.
-   * `ids` switches to id lookup (ServiceFoundry then ignores `name`); otherwise `name` is a substring search.
-   * Always sends `limit`: ServiceFoundry returns every match when it is missing.
+   * Search needs `limit`, since ServiceFoundry returns every match without one. An id lookup returns
+   * at most one user per id, so it sends no paging.
    */
-  async peekUsers(input: {
-    accessToken: string;
-    name?: string;
-    ids?: readonly string[];
-    limit: number;
-    offset: number;
-  }): Promise<PeekUsersResponse> {
-    const filter =
-      input.ids === undefined
-        ? { subjectType: ['user'], ...(input.name === undefined ? {} : { name: input.name }) }
-        : { subjects: input.ids.map(id => ({ subjectType: 'user', subjectId: id })) };
+  async peekUsers(
+    input:
+      | { accessToken: string; name?: string; limit: number; offset: number }
+      | { accessToken: string; ids: readonly string[] },
+  ): Promise<PeekUsersResponse> {
+    const search: Record<string, string> =
+      'ids' in input
+        ? { filter: JSON.stringify({ subjects: input.ids.map(id => ({ subjectType: 'user', subjectId: id })) }) }
+        : {
+            filter: JSON.stringify({
+              subjectType: ['user'],
+              ...(input.name === undefined ? {} : { name: input.name }),
+            }),
+            limit: String(input.limit),
+            offset: String(input.offset),
+          };
     const payload = await this.#requestJson({
-      url: this.#url(SUBJECTS_PEEK_PATH, {
-        filter: JSON.stringify(filter),
-        limit: String(input.limit),
-        offset: String(input.offset),
-      }),
+      url: this.#url(SUBJECTS_PEEK_PATH, search),
       accessToken: input.accessToken,
       method: 'GET',
     });

@@ -89,20 +89,22 @@ export function runAccessControlEntryStoreContractSuite(getEnv: () => AccessCont
     expect(listed).toEqual([original]);
   });
 
-  it('revoke deletes an existing entry and reports a missing one', async () => {
+  it('revoke deletes the listed subjects in one call and ignores ones without an entry', async () => {
     const { store, seedSession } = getEnv();
     await seedSession({ tenant_id: TENANT, session_id: 's1' });
     await store.grantSessionAccess({
       tenant_id: TENANT,
       session_id: 's1',
-      subjects: [user('alice'), user('bob')],
+      subjects: [user('alice'), user('bob'), user('carol')],
       granted_by_subject: OWNER,
     });
 
-    expect(await store.revokeSessionAccess({ tenant_id: TENANT, session_id: 's1', subject: user('alice') })).toBe(true);
-    expect(await store.revokeSessionAccess({ tenant_id: TENANT, session_id: 's1', subject: user('alice') })).toBe(
-      false,
-    );
+    await store.revokeSessionAccess({
+      tenant_id: TENANT,
+      session_id: 's1',
+      subjects: [user('alice'), user('carol'), user('nobody')],
+    });
+
     const listed = await store.listSessionAccess({ tenant_id: TENANT, session_id: 's1' });
     expect(listed.map(record => record.subject_id)).toEqual(['bob']);
   });
@@ -133,9 +135,7 @@ export function runAccessControlEntryStoreContractSuite(getEnv: () => AccessCont
     });
 
     expect(await store.listSessionAccess({ tenant_id: OTHER_TENANT, session_id: 's1' })).toEqual([]);
-    expect(await store.revokeSessionAccess({ tenant_id: OTHER_TENANT, session_id: 's1', subject: user('alice') })).toBe(
-      false,
-    );
+    await store.revokeSessionAccess({ tenant_id: OTHER_TENANT, session_id: 's1', subjects: [user('alice')] });
     expect(await store.listSessionAccess({ tenant_id: TENANT, session_id: 's1' })).toHaveLength(1);
   });
 

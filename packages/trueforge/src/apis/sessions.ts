@@ -39,20 +39,20 @@ import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { ISandboxEnvironmentStore } from '../db/sandboxEnvironmentStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { ISkillStore } from '../db/skillStore';
+import type { WithTransaction } from '../db/transaction';
 import type { IUserStore } from '../db/userStore';
 import type { IWebSearchProviderStore } from '../db/webSearchProviderStore';
 import { updateLogContext } from '../logger';
 import {
   cancelSessionRoute,
-  createSessionGrantsRoute,
   createSessionRoute,
-  deleteSessionGrantRoute,
   deleteSessionRoute,
   getOrCreateSessionByExternalIdRoute,
   getSessionRoute,
   listSessionEventsRoute,
   listSessionGrantsRoute,
   listSessionsRoute,
+  updateSessionGrantsRoute,
   updateSessionRoute,
 } from '../routes/sessionRoutes';
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
@@ -90,11 +90,12 @@ export function toWireSession(record: SessionRecord): Session {
   };
 }
 
-export interface SessionsRouterDeps {
+export interface SessionsRouterDeps<TTransaction = never> {
   sessions: Sessions;
   sessionStore: ISessionStore;
-  accessControlEntryStore: IAccessControlEntryStore;
+  accessControlEntryStore: IAccessControlEntryStore<TTransaction>;
   userStore: IUserStore;
+  withTransaction: WithTransaction<TTransaction>;
   activeTurns: ActiveTurnRegistry;
   resolveModelProviderStore: (input: { c: Context; allowInlineResources?: boolean }) => IModelProviderStore;
   resolveMcpServerStore: (input: { c: Context; allowInlineResources?: boolean }) => IMcpServerStore;
@@ -279,10 +280,14 @@ async function requireOwnedSession(
   return { requestContext, record };
 }
 
+function subjectKey(subject: SessionGrantSubject): string {
+  return `${subject.subject_type}:${subject.subject_id}`;
+}
+
 function uniqueSubjects(subjects: readonly SessionGrantSubject[]): SessionGrantSubject[] {
   const byKey = new Map<string, SessionGrantSubject>();
   for (const subject of subjects) {
-    byKey.set(`${subject.subject_type}:${subject.subject_id}`, subject);
+    byKey.set(subjectKey(subject), subject);
   }
   return [...byKey.values()];
 }
@@ -419,7 +424,7 @@ export function createInternalSessionsRouter(deps: InternalSessionsRouterDeps) {
 }
 
 /** DB-backed sessions (mounted at /api/v1/sessions). */
-export function createSessionsRouter(deps: SessionsRouterDeps) {
+export function createSessionsRouter<TTransaction>(deps: SessionsRouterDeps<TTransaction>) {
   const createSessionHandler: RouteHandler<typeof createSessionRoute> = async c => {
     const body = c.req.valid('json');
     const sessionId = newId();
@@ -699,49 +704,52 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
     return c.json({ data: records.map(toWireSessionGrant) }, 200);
   };
 
-  const createSessionGrantsHandler: RouteHandler<typeof createSessionGrantsRoute> = async c => {
+  const updateSessionGrantsHandler: RouteHandler<typeof updateSessionGrantsRoute> = async c => {
     const { session_id: sessionId } = c.req.valid('param');
     const body = c.req.valid('json');
     const { requestContext } = await requireOwnedSession(deps, { c, session_id: sessionId });
-    const subjects = uniqueSubjects(body.subjects);
-    if (subjects.some(subject => subject.subject_id === requestContext.subject.id)) {
+    const toGrant = uniqueSubjects(body.grant);
+    const toRevoke = uniqueSubjects(body.revoke);
+    const revokeKeys = new Set(toRevoke.map(subjectKey));
+    if (toGrant.some(subject => revokeKeys.has(subjectKey(subject)))) {
+      throw new HTTPException(422, { message: 'A subject cannot be both granted and revoked.' });
+    }
+    const userIds = toGrant.map(subject => subject.subject_id);
+    if (userIds.includes(requestContext.subject.id)) {
       throw new HTTPException(422, { message: 'The session creator already has access.' });
     }
-    const knownUsers = await deps.userStore.getUsersByIds({
-      context: requestContext,
-      ids: subjects.map(subject => subject.subject_id),
-    });
-    const knownIds = new Set(knownUsers.map(user => user.id));
-    const unknownIds = subjects.filter(subject => !knownIds.has(subject.subject_id)).map(subject => subject.subject_id);
-    if (unknownIds.length > 0) {
-      throw new HTTPException(422, { message: `Unknown users: ${unknownIds.join(', ')}` });
+    if (userIds.length > 0) {
+      const knownUsers = await deps.userStore.getUsersByIds({ context: requestContext, ids: userIds });
+      const knownIds = new Set(knownUsers.map(user => user.id));
+      const unknownIds = userIds.filter(id => !knownIds.has(id));
+      if (unknownIds.length > 0) {
+        throw new HTTPException(422, { message: `Unknown users: ${unknownIds.join(', ')}` });
+      }
     }
-    await deps.accessControlEntryStore.grantSessionAccess({
-      tenant_id: requestContext.tenant_id,
-      session_id: sessionId,
-      subjects,
-      granted_by_subject: createdBySubjectFromRequestContext(requestContext),
+    await deps.withTransaction(async transaction => {
+      if (toGrant.length > 0) {
+        await deps.accessControlEntryStore.grantSessionAccess(
+          {
+            tenant_id: requestContext.tenant_id,
+            session_id: sessionId,
+            subjects: toGrant,
+            granted_by_subject: createdBySubjectFromRequestContext(requestContext),
+          },
+          transaction,
+        );
+      }
+      if (toRevoke.length > 0) {
+        await deps.accessControlEntryStore.revokeSessionAccess(
+          { tenant_id: requestContext.tenant_id, session_id: sessionId, subjects: toRevoke },
+          transaction,
+        );
+      }
     });
     const records = await deps.accessControlEntryStore.listSessionAccess({
       tenant_id: requestContext.tenant_id,
       session_id: sessionId,
     });
-    return c.json({ data: records.map(toWireSessionGrant) }, 201);
-  };
-
-  const deleteSessionGrantHandler: RouteHandler<typeof deleteSessionGrantRoute> = async c => {
-    const { session_id: sessionId } = c.req.valid('param');
-    const { subject_type, subject_id } = c.req.valid('query');
-    const { requestContext } = await requireOwnedSession(deps, { c, session_id: sessionId });
-    const revoked = await deps.accessControlEntryStore.revokeSessionAccess({
-      tenant_id: requestContext.tenant_id,
-      session_id: sessionId,
-      subject: { subject_type, subject_id },
-    });
-    if (!revoked) {
-      return c.json({ error: { message: 'Subject does not have access to this session.' } }, 404);
-    }
-    return c.json({}, 200);
+    return c.json({ data: records.map(toWireSessionGrant) }, 200);
   };
 
   const router = new OpenAPIHono();
@@ -753,8 +761,7 @@ export function createSessionsRouter(deps: SessionsRouterDeps) {
   router.openapi(cancelSessionRoute, cancelSessionHandler);
   router.openapi(listSessionEventsRoute, listSessionEventsHandler);
   router.openapi(listSessionGrantsRoute, listSessionGrantsHandler);
-  router.openapi(createSessionGrantsRoute, createSessionGrantsHandler);
-  router.openapi(deleteSessionGrantRoute, deleteSessionGrantHandler);
+  router.openapi(updateSessionGrantsRoute, updateSessionGrantsHandler);
   deps.requestReplyRouter.registerRoute(SESSIONS_CANCEL_PATH, cancelSessionTurnPeerHandler(deps.activeTurns));
   return router;
 }

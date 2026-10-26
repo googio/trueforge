@@ -1,9 +1,10 @@
 /** Tenant user wire schemas. */
 import { z } from '@hono/zod-openapi';
 import { TokenPaginationSchema } from '@truefoundry/trueforge-core/agent-session';
-import { PAGE_LIMIT } from './common';
+import { PAGE_LIMIT, parseCommaSeparatedQuery } from './common';
 
 const LIST_USERS_PAGE_LIMIT = 100;
+const LIST_USERS_MAX_IDS = 100;
 
 export const UserSchema = z
   .object({
@@ -31,6 +32,18 @@ export const ListUsersRequestQuerySchema = z
       .default(PAGE_LIMIT)
       .describe(`Page size. Defaults to ${String(PAGE_LIMIT)}, max ${String(LIST_USERS_PAGE_LIMIT)}.`),
     page_token: z.string().optional().describe('Opaque token from a previous response `next_page_token`.'),
+    ids: z
+      .string()
+      .optional()
+      .openapi({
+        type: 'string',
+        description: `Return only these users (comma-separated ids, up to ${String(LIST_USERS_MAX_IDS)}). Users that are unknown or inactive are omitted. Cannot be combined with \`query\` or \`page_token\`.`,
+      })
+      .transform(value => parseCommaSeparatedQuery(value))
+      .pipe(z.array(z.string().min(1).max(255)).min(1).max(LIST_USERS_MAX_IDS).optional()),
+  })
+  .refine(q => q.ids === undefined || (q.query === undefined && q.page_token === undefined), {
+    message: '`ids` cannot be combined with `query` or `page_token`.',
   })
   .openapi('ListUsersRequestQuery');
 

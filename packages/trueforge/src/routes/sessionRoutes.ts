@@ -15,12 +15,7 @@ import {
   ListSessionsResponseSchema,
   UpdateSessionRequestSchema,
 } from '../schemas/session';
-import {
-  CreateSessionGrantsRequestSchema,
-  DeleteSessionGrantResponseSchema,
-  DeleteSessionGrantsRequestQuerySchema,
-  ListSessionGrantsResponseSchema,
-} from '../schemas/sessionGrant';
+import { ListSessionGrantsResponseSchema, UpdateSessionGrantsRequestSchema } from '../schemas/sessionGrant';
 import { CancelSessionRequestSchema, CancelSessionResponseSchema } from '../schemas/turn';
 import { TOKEN_PAGINATION } from './fernExtensions';
 import { OpenApiTag } from './openapiTags';
@@ -326,24 +321,24 @@ export const listSessionGrantsRoute = createRoute({
   },
 });
 
-export const createSessionGrantsRoute = createRoute({
+export const updateSessionGrantsRoute = createRoute({
   method: 'post',
   path: '/{session_id}/grants',
   tags: [OpenApiTag.AGENT_SESSIONS],
-  summary: 'Share a session',
+  summary: 'Update session grants',
   description:
-    'Share this session with one or more subjects. Subjects that already have access are left unchanged. Returns every subject the session is shared with.',
+    'Share this session with subjects and remove access for others in one atomic request. Granting an existing subject or revoking one without access is a no-op. Returns every subject the session is shared with.',
   'x-fern-sdk-group-name': ['sessions'],
-  'x-fern-sdk-method-name': 'create_grants',
+  'x-fern-sdk-method-name': 'update_grants',
   request: {
     params: SessionIdParamsSchema,
     body: {
-      content: { 'application/json': { schema: CreateSessionGrantsRequestSchema } },
+      content: { 'application/json': { schema: UpdateSessionGrantsRequestSchema } },
       required: true,
     },
   },
   responses: {
-    201: {
+    200: {
       content: { 'application/json': { schema: ListSessionGrantsResponseSchema } },
       description: 'Subjects the session is shared with after the change.',
     },
@@ -361,39 +356,7 @@ export const createSessionGrantsRoute = createRoute({
     },
     422: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'A subject is unknown or is the session creator.',
-    },
-  },
-});
-
-export const deleteSessionGrantRoute = createRoute({
-  method: 'delete',
-  path: '/{session_id}/grants',
-  tags: [OpenApiTag.AGENT_SESSIONS],
-  summary: 'Revoke a session grant',
-  description: "Revoke a subject's access to this session.",
-  'x-fern-sdk-group-name': ['sessions'],
-  'x-fern-sdk-method-name': 'delete_grant',
-  request: {
-    params: SessionIdParamsSchema,
-    query: DeleteSessionGrantsRequestQuerySchema,
-  },
-  responses: {
-    200: {
-      content: { 'application/json': { schema: DeleteSessionGrantResponseSchema } },
-      description: 'Access revoked.',
-    },
-    400: {
-      content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'Invalid query parameters.',
-    },
-    403: {
-      content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'User does not have permission.',
-    },
-    404: {
-      content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'Session not found, or the subject does not have access.',
+      description: 'A subject to grant is unknown or is the session creator, or a subject is both granted and revoked.',
     },
   },
 });

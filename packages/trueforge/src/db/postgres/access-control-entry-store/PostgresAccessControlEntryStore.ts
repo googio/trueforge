@@ -57,15 +57,19 @@ export class PostgresAccessControlEntryStore implements IAccessControlEntryStore
       .execute();
   }
 
-  async revokeSessionAccess(input: RevokeSessionAccessInput, transaction?: Transaction<Database>): Promise<boolean> {
+  async revokeSessionAccess(input: RevokeSessionAccessInput, transaction?: Transaction<Database>): Promise<void> {
     const db = transaction ?? this.#db;
-    const result = await db
+    await db
       .deleteFrom('access_control_entry')
       .where('tenant_id', '=', input.tenant_id)
       .where('session_id', '=', input.session_id)
-      .where('subject_type', '=', input.subject.subject_type)
-      .where('subject_id', '=', input.subject.subject_id)
-      .executeTakeFirst();
-    return result.numDeletedRows > 0n;
+      .where(eb =>
+        eb.or(
+          input.subjects.map(subject =>
+            eb.and([eb('subject_type', '=', subject.subject_type), eb('subject_id', '=', subject.subject_id)]),
+          ),
+        ),
+      )
+      .execute();
   }
 }

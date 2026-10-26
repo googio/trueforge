@@ -28,10 +28,15 @@ function decodeOffset(pageToken: string | undefined): number {
 
 export function createUsersRouter(deps: UsersRouterDeps): OpenAPIHono {
   const listUsersHandler: RouteHandler<typeof listUsersRoute> = async c => {
-    const { query, limit, page_token: pageToken } = c.req.valid('query');
+    const { query, limit, page_token: pageToken, ids } = c.req.valid('query');
+    const context = deps.resolveRequestContext(c);
+    if (ids !== undefined) {
+      const users = await deps.userStore.getUsersByIds({ context, ids });
+      return c.json({ data: users, pagination: { limit: ids.length } }, 200);
+    }
     const offset = decodeOffset(pageToken);
     const { data, total } = await deps.userStore.listUsers({
-      context: deps.resolveRequestContext(c),
+      context,
       query,
       limit,
       offset,
