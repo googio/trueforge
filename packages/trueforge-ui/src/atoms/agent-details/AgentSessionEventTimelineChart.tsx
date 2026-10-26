@@ -20,7 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, 
 import { Chart } from 'react-chartjs-2';
 
 import { useThemeMode } from '../../theme/SlotsProvider.js';
-import { formatReadableDurationMs, roundDurationMsToSecond } from '../../utils/sessionDisplayFormat.js';
+import { roundDurationMsToSecond } from '../../utils/sessionDisplayFormat.js';
 import {
   getSessionEventColor,
   getSessionEventHoverColor,
@@ -33,11 +33,16 @@ import {
 import {
   applyPauseChipLayout,
   buildTimelineAxisTicks,
+  buildTimelineGaps,
+  formatTimelineAxisDuration,
+  getActiveTimelineMs,
   getSubAgentHoverGroups,
   getSubAgentLanes,
+  getTimelineAxisTickTarget,
   getTimelineHoverTargetId,
   getTimelineLayout,
   getTimelineRange,
+  getTimelineTurnStretch,
   getTurnGapAnchorMs,
   getTurnGapShiftsMs,
   getWallTimelineMs,
@@ -50,6 +55,8 @@ import {
   type TimelineHoverTarget,
   type TimelinePauseChipRange,
   type TimelineTurnBar,
+  type TimelineTurnRange,
+  type TimelineTurnStretch,
   type TimelineVisualGap,
 } from '../../utils/sessionEventTimelineChart.js';
 import { aggregateSessionTurnBand } from '../../utils/sessionTurnViews.js';
@@ -68,6 +75,8 @@ ChartJS.register(BarController, BarElement, LinearScale, PointElement, ScatterCo
 
 /** Diamond / min bar width in px. */
 const MARKER_PX = 4;
+/** Wide enough for a T999 label in the 10px turn font. */
+const MIN_TURN_BAR_PX = 32;
 /** Empty space drawn between turns (not real idle time). */
 const TURN_GAP_PX = 12;
 /** Fixed width of each hatched “Paused” chip. */
@@ -186,11 +195,37 @@ function pickTimelineHoverElement({
   return best;
 }
 
-function turnBarLabelPoint(element: object): { x: number; y: number } | null {
+function turnBarLabelPoint(element: object): { x: number; y: number; width: number } | null {
   if (!('x' in element) || !('y' in element) || !('base' in element)) return null;
   const { x, y, base } = element;
   if (typeof x !== 'number' || typeof y !== 'number' || typeof base !== 'number') return null;
-  return { x: (x + base) / 2, y };
+  return { x: (x + base) / 2, y, width: Math.abs(x - base) };
+}
+
+/** Active-time position after short-turn stretch. Turn gaps and pause chips stay outside this. */
+function stretchActiveMs({
+  activeMs,
+  turn,
+  stretch,
+  msPerPx,
+}: {
+  activeMs: number;
+  turn: TimelineTurnRange | undefined;
+  stretch: TimelineTurnStretch;
+  msPerPx: number;
+}): number {
+  if (turn == null) return activeMs;
+  const scaleFactor = stretch.scale[turn.ordinal] ?? 1;
+  const leadingMs = (stretch.leadingExtraPx[turn.ordinal] ?? 0) * msPerPx;
+  const durationMs = Math.max(0, turn.endMs - turn.startMs);
+  const within = Math.min(Math.max(activeMs - turn.startMs, 0), durationMs);
+  const beyond = activeMs - turn.startMs - within;
+  const stretched = turn.startMs + within * scaleFactor + beyond + leadingMs;
+  // A zero-length turn cannot grow by scaling, so its minimum width is added here.
+  if (durationMs <= 0 && activeMs >= turn.endMs) {
+    return stretched + (stretch.extraPx[turn.ordinal] ?? 0) * msPerPx;
+  }
+  return stretched;
 }
 
 export function AgentSessionEventTimelineChart({
@@ -295,6 +330,33 @@ export function AgentSessionEventTimelineChart({
     () => getTurnGapShiftsMs({ turnRanges, pauseChipStartsMs, turnGapMs }),
     [pauseChipStartsMs, turnGapMs, turnRanges],
   );
+  const orderedRanges = useMemo(
+    () => [...turnRanges].sort((left, right) => left.ordinal - right.ordinal),
+    [turnRanges],
+  );
+  const turnsByIndex = useMemo(() => new Map(orderedRanges.map(range => [range.turnIndex, range])), [orderedRanges]);
+  // Long turns keep the pane's time scale. Short turns stretch and widen the chart.
+  const stretch = useMemo(
+    () =>
+      widthPx > 0
+        ? getTimelineTurnStretch({
+            durationsMs: orderedRanges.map(range => Math.max(0, range.endMs - range.startMs)),
+            msPerPx,
+            minTurnBarPx: MIN_TURN_BAR_PX,
+            markerPx: MARKER_PX,
+          })
+        : {
+            extraPx: orderedRanges.map(() => 0),
+            scale: orderedRanges.map(() => 1),
+            leadingExtraPx: orderedRanges.map(() => 0),
+          },
+    [msPerPx, orderedRanges, widthPx],
+  );
+  const unclampedScaleWidthPx = widthPx - TURN_GAP_PX * gapCount - PAUSE_CHIP_PX * pauseChipCount - END_PAD_PX;
+  const floorDeficitPx = widthPx > 0 ? Math.max(0, scaleWidthPx - unclampedScaleWidthPx) : 0;
+  const totalExtraPx = stretch.extraPx.reduce((sum, px) => sum + px, 0) + floorDeficitPx;
+  const scrolls = totalExtraPx > 0;
+  const chartWidthPx = widthPx + Math.ceil(totalExtraPx);
   // Visual gaps drive both chart spacing and wall-time axis labels.
   const visualGaps = useMemo<TimelineVisualGap[]>(() => {
     const turnGaps = turnGapAnchorMs.map(atActiveMs => ({ atActiveMs, gapMs: turnGapMs }));
@@ -313,19 +375,29 @@ export function AgentSessionEventTimelineChart({
     return [...turnGaps, ...pauseGapsByStart.values()].sort((left, right) => left.atActiveMs - right.atActiveMs);
   }, [hiddenTypes, hideSubAgentThreads, pauseChipMs, segments, turnGapAnchorMs, turnGapMs]);
   const totalMs = activeTotalMs + visualGaps.reduce((sum, gap) => sum + gap.gapMs, 0);
-  const timelineMaxMs = totalMs + END_PAD_PX * msPerPx;
+  const timelineMaxMs = totalMs + END_PAD_PX * msPerPx + totalExtraPx * msPerPx;
 
-  // Shift later turns for separators, then expand each pause chip to pauseChipMs.
+  // Shift later turns for separators, stretch short turns, then expand each pause chip.
   // Hiding "Sub-agent" drops that type and every non-main thread (markers/pauses stay off main).
   const visibleSegments = useMemo(() => {
+    const placeActiveMs = (activeMs: number, turnIndex: number): number => {
+      const turn = turnsByIndex.get(turnIndex);
+      const shiftMs = turnGapShiftsMs.get(turnIndex) ?? 0;
+      return stretchActiveMs({ activeMs, turn, stretch, msPerPx }) + shiftMs;
+    };
     const turnShifted = segments.flatMap(segment => {
       if (hiddenTypes.has(segment.type)) return [];
       if (hideSubAgentThreads && segment.threadId !== MAIN_THREAD_ID) return [];
-      const shiftMs = turnGapShiftsMs.get(segment.turnIndex) ?? 0;
-      return [{ ...segment, startMs: segment.startMs + shiftMs, endMs: segment.endMs + shiftMs }];
+      return [
+        {
+          ...segment,
+          startMs: placeActiveMs(segment.startMs, segment.turnIndex),
+          endMs: placeActiveMs(segment.endMs, segment.turnIndex),
+        },
+      ];
     });
     return applyPauseChipLayout({ segments: turnShifted, pauseChipMs });
-  }, [hiddenTypes, hideSubAgentThreads, pauseChipMs, segments, turnGapShiftsMs]);
+  }, [hiddenTypes, hideSubAgentThreads, msPerPx, pauseChipMs, segments, stretch, turnGapShiftsMs, turnsByIndex]);
   const pauseChipSegments = useMemo(
     () => visibleSegments.filter(segment => segment.isPauseChip && !segment.isCompressionOnly),
     [visibleSegments],
@@ -370,9 +442,14 @@ export function AgentSessionEventTimelineChart({
     if (turnRanges.length < 2) return [];
     return turnRanges.map(range => {
       const inTurn = visibleSegments.filter(segment => segment.turnIndex === range.turnIndex);
-      const fallbackStart = range.startMs + (turnGapShiftsMs.get(range.turnIndex) ?? 0);
+      const fallbackStart =
+        stretchActiveMs({ activeMs: range.startMs, turn: range, stretch, msPerPx }) +
+        (turnGapShiftsMs.get(range.turnIndex) ?? 0);
       const startMs = inTurn.reduce((min, segment) => Math.min(min, segment.startMs), fallbackStart);
-      const endMs = inTurn.reduce((max, segment) => Math.max(max, segment.endMs), startMs) + MARKER_PX * msPerPx;
+      const durationMs = Math.max(0, range.endMs - range.startMs);
+      const zeroTurnExtraMs = durationMs <= 0 ? (stretch.extraPx[range.ordinal] ?? 0) * msPerPx : 0;
+      const endMs =
+        inTurn.reduce((max, segment) => Math.max(max, segment.endMs), startMs) + MARKER_PX * msPerPx + zeroTurnExtraMs;
       // Compressed range omits pause waits. Merge chips with spans so a sibling
       // that is still waiting after resume is included once.
       const pauseWallMs = mergedPauseWallMs(segments.filter(segment => segment.turnIndex === range.turnIndex));
@@ -384,7 +461,7 @@ export function AgentSessionEventTimelineChart({
         endMs,
       };
     });
-  }, [msPerPx, segments, turnGapShiftsMs, turnRanges, visibleSegments]);
+  }, [msPerPx, segments, stretch, turnGapShiftsMs, turnRanges, visibleSegments]);
   const subAgentSegments = useMemo(
     () => durationSegments.filter(segment => segment.type === 'sub_agent'),
     [durationSegments],
@@ -761,7 +838,10 @@ export function AgentSessionEventTimelineChart({
           const element = chart.getDatasetMeta(index).data[0];
           if (element == null) return;
           const point = turnBarLabelPoint(element);
-          if (point) ctx.fillText(`T${bar.ordinal + 1}`, point.x, point.y);
+          if (point == null) return;
+          const label = `T${bar.ordinal + 1}`;
+          if (ctx.measureText(label).width > point.width) return;
+          ctx.fillText(label, point.x, point.y);
         });
         ctx.restore();
       },
@@ -826,20 +906,35 @@ export function AgentSessionEventTimelineChart({
           grid: { color: grid },
           border: { color: grid },
           afterBuildTicks: scale => {
-            scale.ticks = buildTimelineAxisTicks({ activeTotalMs, visualGaps });
+            const built = buildTimelineAxisTicks({
+              activeTotalMs,
+              visualGaps,
+              ...(chartWidthPx > 0 ? { chartWidthPx } : {}),
+            });
+            const chartGaps = buildTimelineGaps(visualGaps);
+            scale.ticks = built.map(tick => {
+              const activeMs = getActiveTimelineMs(tick.value, chartGaps);
+              const turn = [...orderedRanges].reverse().find(range => range.startMs <= activeMs);
+              const stretchedActive = stretchActiveMs({ activeMs, turn, stretch, msPerPx });
+              return { value: tick.value + (stretchedActive - activeMs) };
+            });
           },
           ticks: {
             color: axis,
             align: 'inner',
             autoSkip: false,
             includeBounds: false,
-            maxTicksLimit: 9,
+            maxTicksLimit: Math.max(9, getTimelineAxisTickTarget(chartWidthPx)),
             // Chart x is compressed; labels jump by wall wait across pause chips.
             callback: value => {
               const timelineMs = Number(value);
-              return timelineMs <= totalMs
-                ? formatReadableDurationMs(getWallTimelineMs({ valueMs: timelineMs, visualGaps }))
-                : '';
+              if (timelineMs > timelineMaxMs) return '';
+              const chartGaps = buildTimelineGaps(visualGaps);
+              const activeMs = getActiveTimelineMs(timelineMs, chartGaps);
+              const turn = [...orderedRanges].reverse().find(range => range.startMs <= activeMs);
+              const stretchedActive = stretchActiveMs({ activeMs, turn, stretch, msPerPx });
+              const unstretchedChartMs = timelineMs - (stretchedActive - activeMs);
+              return formatTimelineAxisDuration(getWallTimelineMs({ valueMs: unstretchedChartMs, visualGaps }));
             },
           },
         },
@@ -859,11 +954,14 @@ export function AgentSessionEventTimelineChart({
       axis,
       band,
       chartTargets,
+      chartWidthPx,
       grid,
+      msPerPx,
       onSelectTurn,
+      orderedRanges,
       refreshTooltipAnchor,
+      stretch,
       timelineMaxMs,
-      totalMs,
       visualGaps,
     ],
   );
@@ -900,26 +998,28 @@ export function AgentSessionEventTimelineChart({
     ) : null;
 
   return (
-    <div ref={wrapperRef} className="w-full" data-slot="agent-session-event-timeline-chart">
-      <LightTooltip
-        title={tooltipContent}
-        side="bottom"
-        triggerClassName="block w-full"
-        followCursor
-        interactive={false}
-        open={tooltipTarget != null && tooltipContent != null}
-        className="max-w-[min(25rem,calc(100vw-1rem))] whitespace-normal"
-        anchor={tooltipAnchor}
-      >
-        <div className="w-full" style={containerStyle} onMouseLeave={clearTooltip}>
-          <Chart<TimelineChartType, Array<BarPoint | MarkerPoint>, string>
-            type="bar"
-            data={chartData}
-            options={chartOptions}
-            plugins={[turnLabelPlugin, overheadPlugin]}
-          />
-        </div>
-      </LightTooltip>
+    <div ref={wrapperRef} className="w-full overflow-x-auto" data-slot="agent-session-event-timeline-chart">
+      <div style={{ width: scrolls ? chartWidthPx : '100%' }}>
+        <LightTooltip
+          title={tooltipContent}
+          side="bottom"
+          triggerClassName="block w-full"
+          followCursor
+          interactive={false}
+          open={tooltipTarget != null && tooltipContent != null}
+          className="max-w-[min(25rem,calc(100vw-1rem))] whitespace-normal"
+          anchor={tooltipAnchor}
+        >
+          <div className="w-full" style={containerStyle} onMouseLeave={clearTooltip}>
+            <Chart<TimelineChartType, Array<BarPoint | MarkerPoint>, string>
+              type="bar"
+              data={chartData}
+              options={chartOptions}
+              plugins={[turnLabelPlugin, overheadPlugin]}
+            />
+          </div>
+        </LightTooltip>
+      </div>
     </div>
   );
 }

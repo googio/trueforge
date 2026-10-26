@@ -51,7 +51,7 @@ import type { ISessionMetricsStore } from './db/sessionMetricsStore';
 import type { ISkillStore } from './db/skillStore';
 import type { WithTransaction } from './db/transaction';
 import type { IWebSearchProviderStore } from './db/webSearchProviderStore';
-import { createHttpMetrics } from './http/prometheus';
+import type { HttpMetrics } from './http/prometheus';
 import { createClientCertificateMiddleware } from './http/tls';
 import { runWithLogContext, updateLogContext, type LogContext } from './logger';
 import type { IOAuthTokenStore } from './mcp/auth/types';
@@ -159,6 +159,7 @@ export function createAppErrorHandler(params: { logger: Logger }): ErrorHandler 
         path: c.req.path,
         status,
         ...extractErrorLogFields(error),
+        ...(status >= 500 ? { reportable_error: { error } } : {}),
       };
       if (status >= 500) {
         params.logger.error(message, fields);
@@ -325,6 +326,8 @@ export interface ServerDeps<TTransaction> {
   /** DB singleton, or the env-backed shared store in TrueFoundry mode. */
   webSearchProviderStore: IWebSearchProviderStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
+  /** Shared scrape target. HTTP middleware and `GET /metrics` use this registry. */
+  httpMetrics: HttpMetrics;
 }
 
 export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
@@ -334,7 +337,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   const scheduleExecutionAuthMiddleware = createApiKeyAuthMiddleware(configuration.TRUEFORGE_API_KEY);
   const authEnabled = getTrueForgeAuthMode() !== TrueForgeAuthMode.Standalone;
   const resolveHttpAgentStore = (c: Context) => deps.resolveAgentStore(resolveRequestContext(c));
-  const httpMetrics = createHttpMetrics();
+  const httpMetrics = deps.httpMetrics;
   app.use('*', createRequestLogContextMiddleware());
   app.use('/api/v1/sessions/:session_id/*', createSessionPathLogContextMiddleware());
   app.use('/api/v1/sessions/:session_id/turns/:turn_id/*', createSessionPathLogContextMiddleware());
