@@ -1,15 +1,15 @@
 import type { Kysely, Transaction } from 'kysely';
 import type {
   GrantSessionAccessInput,
-  IAccessControlEntryStore,
+  IAccessControlStore,
   ListSessionAccessInput,
   RevokeSessionAccessInput,
   SessionAccessRecord,
-} from '../../accessControlEntryStore';
+} from '../../accessControlStore';
 import { json, now } from '../sqlExpressions';
 import type { Database } from '../types';
 
-export class PostgresAccessControlEntryStore implements IAccessControlEntryStore<Transaction<Database>> {
+export class PostgresAccessControlStore implements IAccessControlStore<Transaction<Database>> {
   readonly #db: Kysely<Database>;
 
   constructor(db: Kysely<Database>) {

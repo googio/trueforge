@@ -1,13 +1,13 @@
 import { sql } from 'kysely';
 
-import { PostgresAccessControlEntryStore } from '../../../../src/db/postgres/access-control-entry-store/PostgresAccessControlEntryStore';
+import { PostgresAccessControlStore } from '../../../../src/db/postgres/access-control-store/PostgresAccessControlStore';
 import { PostgresSessionStore } from '../../../../src/db/postgres/session-store/PostgresSessionStore';
-import { runAccessControlEntryStoreContractSuite, sessionSeeding } from '../../accessControlEntryStoreContractSuite';
+import { runAccessControlStoreContractSuite, sessionSeeding } from '../../accessControlStoreContractSuite';
 import { createPostgresTestDatabase, type PostgresTestDatabase } from '../testDatabase';
 
 const describePg = process.env['PG_STORE_TESTS_ENABLED'] === '1' ? describe : describe.skip;
 
-describePg('PostgresAccessControlEntryStore (IAccessControlEntryStore contract)', () => {
+describePg('PostgresAccessControlStore (IAccessControlStore contract)', () => {
   let env: PostgresTestDatabase | undefined;
 
   beforeAll(async () => {
@@ -27,12 +27,12 @@ describePg('PostgresAccessControlEntryStore (IAccessControlEntryStore contract)'
     }
   });
 
-  runAccessControlEntryStoreContractSuite(() => {
+  runAccessControlStoreContractSuite(() => {
     if (env === undefined) {
       throw new Error('Postgres test environment not initialized');
     }
     return {
-      store: new PostgresAccessControlEntryStore(env.db),
+      store: new PostgresAccessControlStore(env.db),
       ...sessionSeeding(new PostgresSessionStore(env.db)),
     };
   });

@@ -9,7 +9,7 @@ import { createAppErrorHandler } from '../../../src/app';
 import { TrueForgeAuthorizer } from '../../../src/auth/authorizer';
 import type { RequestContext } from '../../../src/auth/identity';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
-import { SqliteAccessControlEntryStore } from '../../../src/db/sqlite/access-control-entry-store/SqliteAccessControlEntryStore';
+import { SqliteAccessControlStore } from '../../../src/db/sqlite/access-control-store/SqliteAccessControlStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
@@ -84,7 +84,7 @@ function buildApp(input: { db: Kysely<Database>; sessionStore: SqliteSessionStor
     createSessionsRouter({
       sessions: new Sessions({ sessionStore }),
       sessionStore,
-      accessControlEntryStore: new SqliteAccessControlEntryStore(db),
+      accessControlStore: new SqliteAccessControlStore(db),
       userStore,
       withTransaction: callback => db.transaction().execute(callback),
       activeTurns: new ActiveTurnRegistry(),

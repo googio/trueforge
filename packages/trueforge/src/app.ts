@@ -42,7 +42,7 @@ import type { SandboxCatalog } from './catalog/SandboxCatalog';
 import type { SkillCatalog } from './catalog/SkillCatalog';
 import type { WebSearchCatalog } from './catalog/WebSearchCatalog';
 import configuration, { getPublicUiBasePath, getTrueForgeAuthMode, TrueForgeAuthMode } from './config';
-import type { IAccessControlEntryStore } from './db/accessControlEntryStore';
+import type { IAccessControlStore } from './db/accessControlStore';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
 import type { IMcpServerWithAuthStore } from './db/mcpServerStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
@@ -304,7 +304,7 @@ export interface ServerDeps<TTransaction> {
   tokenStore: IOAuthTokenStore<TTransaction>;
   scheduleStore: IScheduleStore<TTransaction>;
   sessionStore: ISessionStore;
-  accessControlEntryStore: IAccessControlEntryStore<TTransaction>;
+  accessControlStore: IAccessControlStore<TTransaction>;
   sessionMetricsStore: ISessionMetricsStore;
   /** Tenant users that sessions can be shared with. */
   userStore: IUserStore;
@@ -586,7 +586,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createSessionsRouter({
         sessions: deps.sessions,
         sessionStore: deps.sessionStore,
-        accessControlEntryStore: deps.accessControlEntryStore,
+        accessControlStore: deps.accessControlStore,
         userStore: deps.userStore,
         withTransaction: deps.withTransaction,
         activeTurns: deps.activeTurns,

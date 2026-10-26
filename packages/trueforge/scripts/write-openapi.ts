@@ -23,7 +23,7 @@ import { SkillCatalog } from '../src/catalog/SkillCatalog';
 import { WebSearchCatalog } from '../src/catalog/WebSearchCatalog';
 import configuration from '../src/config';
 import { McpServerWithAuthStore } from '../src/db/McpServerWithAuthStore';
-import { SqliteAccessControlEntryStore } from '../src/db/sqlite/access-control-entry-store/SqliteAccessControlEntryStore';
+import { SqliteAccessControlStore } from '../src/db/sqlite/access-control-store/SqliteAccessControlStore';
 import { SqliteAgentStore } from '../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../src/db/sqlite/client';
 import { SqliteMcpServerStore } from '../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
@@ -99,7 +99,7 @@ const app = createServerApp({
   scheduleStore: new SqliteScheduleStore(db),
   tokenStore,
   sessionStore,
-  accessControlEntryStore: new SqliteAccessControlEntryStore(db),
+  accessControlStore: new SqliteAccessControlStore(db),
   sessionMetricsStore: new SqliteSessionMetricsStore(db),
   userStore: new EmptyUserStore(),
   sessions: new Sessions({ sessionStore }),

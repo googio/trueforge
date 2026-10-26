@@ -32,7 +32,7 @@ export interface RevokeSessionAccessInput {
   subjects: SessionGrantSubject[];
 }
 
-export interface IAccessControlEntryStore<TTransaction = never> {
+export interface IAccessControlStore<TTransaction = never> {
   /** Ordered by (created_at, subject_id). */
   listSessionAccess(input: ListSessionAccessInput, transaction?: TTransaction): Promise<SessionAccessRecord[]>;
   /**

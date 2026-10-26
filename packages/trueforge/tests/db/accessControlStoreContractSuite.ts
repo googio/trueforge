@@ -1,9 +1,9 @@
 /**
- * Backend-agnostic behavioural contract for IAccessControlEntryStore.
+ * Backend-agnostic behavioural contract for IAccessControlStore.
  * Runs under jest against a fresh store per test (see backend test files).
  */
 import { AgentSpecSchema, type CreatedBySubject, type ISessionStore } from '@truefoundry/trueforge-core/agent-session';
-import type { IAccessControlEntryStore } from '../../src/db/accessControlEntryStore';
+import type { IAccessControlStore } from '../../src/db/accessControlStore';
 
 const TENANT = 'default';
 const OTHER_TENANT = 'other-tenant';
@@ -13,8 +13,8 @@ const OWNER: CreatedBySubject = { subject_id: 'owner', subject_type: 'user', sub
 const OTHER_GRANTER: CreatedBySubject = { subject_id: 'other', subject_type: 'user', subject_display_name: 'Other' };
 const SPEC = AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' }, instructions: 'test' });
 
-export interface AccessControlEntryStoreContractEnv {
-  store: IAccessControlEntryStore;
+export interface AccessControlStoreContractEnv {
+  store: IAccessControlStore;
   seedSession: (input: { tenant_id: string; session_id: string }) => Promise<void>;
   deleteSession: (input: { tenant_id: string; session_id: string }) => Promise<void>;
 }
@@ -22,7 +22,7 @@ export interface AccessControlEntryStoreContractEnv {
 /** Session seeding through the backend's real session store. */
 export function sessionSeeding(
   sessionStore: ISessionStore,
-): Pick<AccessControlEntryStoreContractEnv, 'seedSession' | 'deleteSession'> {
+): Pick<AccessControlStoreContractEnv, 'seedSession' | 'deleteSession'> {
   return {
     async seedSession({ tenant_id, session_id }) {
       await sessionStore.createSession({
@@ -46,7 +46,7 @@ function user(subject_id: string) {
   return { subject_type: 'user' as const, subject_id };
 }
 
-export function runAccessControlEntryStoreContractSuite(getEnv: () => AccessControlEntryStoreContractEnv): void {
+export function runAccessControlStoreContractSuite(getEnv: () => AccessControlStoreContractEnv): void {
   it('grants users and lists them with the granter and an ISO-UTC timestamp', async () => {
     const { store, seedSession } = getEnv();
     await seedSession({ tenant_id: TENANT, session_id: 's1' });

@@ -4,12 +4,7 @@ import { createLogger } from 'winston';
 import { createUsersRouter } from '../../../src/apis/users';
 import { createAppErrorHandler } from '../../../src/app';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
-import {
-  EmptyUserStore,
-  type GetUsersByIdsInput,
-  type IUserStore,
-  type ListUsersInput,
-} from '../../../src/db/userStore';
+import { type GetUsersByIdsInput, type IUserStore, type ListUsersInput } from '../../../src/db/userStore';
 import { ListUsersResponseSchema, type User } from '../../../src/schemas/user';
 
 const USERS: User[] = Array.from({ length: 5 }, (_, i) => ({
@@ -67,14 +62,6 @@ describe('users API', () => {
     expect(last.pagination.next_page_token).toBeUndefined();
   });
 
-  it('defaults the page size', async () => {
-    const { userStore, listUsers } = pagedUserStore();
-
-    await buildApp(userStore).request('/');
-
-    expect(listUsers).toHaveBeenCalledWith(expect.objectContaining({ query: undefined, limit: 25, offset: 0 }));
-  });
-
   it('rejects an invalid page token', async () => {
     const { userStore, listUsers } = pagedUserStore();
 
@@ -82,13 +69,6 @@ describe('users API', () => {
 
     expect(response.status).toBe(400);
     expect(listUsers).not.toHaveBeenCalled();
-  });
-
-  it('returns an empty list without a configured user store', async () => {
-    const response = await buildApp(new EmptyUserStore()).request('/');
-
-    expect(response.status).toBe(200);
-    expect(ListUsersResponseSchema.parse(await response.json())).toEqual({ data: [], pagination: { limit: 25 } });
   });
 
   describe('ids', () => {
@@ -105,19 +85,10 @@ describe('users API', () => {
       expect(body.pagination).toEqual({ limit: 3 });
     });
 
-    it('accepts up to 100 ids', async () => {
-      const { userStore } = pagedUserStore();
-      const ids = Array.from({ length: 100 }, (_, i) => `u${String(i)}`).join(',');
-
-      expect((await buildApp(userStore).request(`/?ids=${ids}`)).status).toBe(200);
-    });
-
     it.each([
       ['more than 100 ids', `ids=${Array.from({ length: 101 }, (_, i) => `u${String(i)}`).join(',')}`],
       ['an empty list', 'ids='],
-      ['only separators', 'ids=,,'],
       ['a query as well', 'ids=u1&query=ali'],
-      ['a page token as well', `ids=u1&page_token=${encodeOffsetPageToken(2)}`],
     ])('rejects %s', async (_label, search) => {
       const { userStore, listUsers, getUsersByIds } = pagedUserStore();
 

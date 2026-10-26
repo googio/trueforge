@@ -112,7 +112,7 @@ import { SkillCatalog } from './catalog/SkillCatalog';
 import { WebSearchCatalog } from './catalog/WebSearchCatalog';
 import { type DistributedServerConfiguration } from './config';
 import { createController } from './controller';
-import type { IAccessControlEntryStore } from './db/accessControlEntryStore';
+import type { IAccessControlStore } from './db/accessControlStore';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
 import type { IMcpServerStore, IMcpServerWithAuthStore } from './db/mcpServerStore';
 import { McpServerWithAuthStore } from './db/McpServerWithAuthStore';
@@ -197,7 +197,7 @@ type ResolveTurnSkillsStore<TTransaction> = (input: {
 interface ServerPersistence<TTransaction> {
   withTransaction: WithTransaction<TTransaction>;
   sessionStore: ISessionStore;
-  accessControlEntryStore: IAccessControlEntryStore<TTransaction>;
+  accessControlStore: IAccessControlStore<TTransaction>;
   sessionMetricsStore: ISessionMetricsStore;
   tokenStore: IOAuthTokenStore<TTransaction>;
   scheduleStore: IScheduleStore<TTransaction>;
@@ -420,7 +420,7 @@ async function createStandalonePersistence(options: {
       import('./db/sqlite/agent-store/SqliteAgentStore'),
       import('./db/sqlite/schedule-store/SqliteScheduleStore'),
       import('./db/sqlite/sandbox-environment-store/SqliteSandboxEnvironmentStore'),
-      import('./db/sqlite/access-control-entry-store/SqliteAccessControlEntryStore'),
+      import('./db/sqlite/access-control-store/SqliteAccessControlStore'),
     ]),
   ]);
   const [
@@ -435,7 +435,7 @@ async function createStandalonePersistence(options: {
     { SqliteAgentStore },
     { SqliteScheduleStore },
     { SqliteSandboxEnvironmentStore },
-    { SqliteAccessControlEntryStore },
+    { SqliteAccessControlStore },
   ] = sqliteStores;
 
   const db = createSqliteDb(sqlitePath);
@@ -458,7 +458,7 @@ async function createStandalonePersistence(options: {
   return {
     withTransaction: callback => db.transaction().execute(callback),
     sessionStore: new SqliteSessionStore(db),
-    accessControlEntryStore: new SqliteAccessControlEntryStore(db),
+    accessControlStore: new SqliteAccessControlStore(db),
     sessionMetricsStore: new SqliteSessionMetricsStore(db),
     mcpOAuthStore: mcpServerStore,
     tokenStore,
@@ -523,7 +523,7 @@ async function createDistributedPersistence(options: {
       import('./db/postgres/agent-store/PostgresAgentStore'),
       import('./db/postgres/schedule-store/PostgresScheduleStore'),
       import('./db/postgres/sandbox-environment-store/PostgresSandboxEnvironmentStore'),
-      import('./db/postgres/access-control-entry-store/PostgresAccessControlEntryStore'),
+      import('./db/postgres/access-control-store/PostgresAccessControlStore'),
     ]),
   ]);
   const [
@@ -538,7 +538,7 @@ async function createDistributedPersistence(options: {
     { PostgresAgentStore },
     { PostgresScheduleStore },
     { PostgresSandboxEnvironmentStore },
-    { PostgresAccessControlEntryStore },
+    { PostgresAccessControlStore },
   ] = postgresStores;
 
   logger.info('Connecting to Postgres');
@@ -605,7 +605,7 @@ async function createDistributedPersistence(options: {
   return {
     withTransaction: callback => db.transaction().execute(callback),
     sessionStore: new PostgresSessionStore(db),
-    accessControlEntryStore: new PostgresAccessControlEntryStore(db),
+    accessControlStore: new PostgresAccessControlStore(db),
     sessionMetricsStore: new PostgresSessionMetricsStore(db),
     mcpOAuthStore: mcpServerWithAuthStore,
     tokenStore,
@@ -645,7 +645,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const {
     withTransaction,
     sessionStore,
-    accessControlEntryStore,
+    accessControlStore,
     sessionMetricsStore,
     tokenStore,
     scheduleStore,
@@ -809,7 +809,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sandboxEnvironmentStore,
     sandboxProviderStore: persistence.sandboxProviderStore,
     sessionStore,
-    accessControlEntryStore,
+    accessControlStore,
     sessionMetricsStore,
     userStore,
     sessions,

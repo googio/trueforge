@@ -32,7 +32,7 @@ import type { ResolveSkillStoreInput } from '../app';
 import type { Authorizer } from '../auth/authorizer';
 import { createdBySubjectFromRequestContext, type RequestContext, type ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
-import type { IAccessControlEntryStore, SessionAccessRecord } from '../db/accessControlEntryStore';
+import type { IAccessControlStore, SessionAccessRecord } from '../db/accessControlStore';
 import type { IAgentStore } from '../db/agentStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
@@ -93,7 +93,7 @@ export function toWireSession(record: SessionRecord): Session {
 export interface SessionsRouterDeps<TTransaction = never> {
   sessions: Sessions;
   sessionStore: ISessionStore;
-  accessControlEntryStore: IAccessControlEntryStore<TTransaction>;
+  accessControlStore: IAccessControlStore<TTransaction>;
   userStore: IUserStore;
   withTransaction: WithTransaction<TTransaction>;
   activeTurns: ActiveTurnRegistry;
@@ -697,7 +697,7 @@ export function createSessionsRouter<TTransaction>(deps: SessionsRouterDeps<TTra
   const listSessionGrantsHandler: RouteHandler<typeof listSessionGrantsRoute> = async c => {
     const { session_id: sessionId } = c.req.valid('param');
     const { requestContext } = await requireOwnedSession(deps, { c, session_id: sessionId });
-    const records = await deps.accessControlEntryStore.listSessionAccess({
+    const records = await deps.accessControlStore.listSessionAccess({
       tenant_id: requestContext.tenant_id,
       session_id: sessionId,
     });
@@ -728,7 +728,7 @@ export function createSessionsRouter<TTransaction>(deps: SessionsRouterDeps<TTra
     }
     await deps.withTransaction(async transaction => {
       if (toGrant.length > 0) {
-        await deps.accessControlEntryStore.grantSessionAccess(
+        await deps.accessControlStore.grantSessionAccess(
           {
             tenant_id: requestContext.tenant_id,
             session_id: sessionId,
@@ -739,13 +739,13 @@ export function createSessionsRouter<TTransaction>(deps: SessionsRouterDeps<TTra
         );
       }
       if (toRevoke.length > 0) {
-        await deps.accessControlEntryStore.revokeSessionAccess(
+        await deps.accessControlStore.revokeSessionAccess(
           { tenant_id: requestContext.tenant_id, session_id: sessionId, subjects: toRevoke },
           transaction,
         );
       }
     });
-    const records = await deps.accessControlEntryStore.listSessionAccess({
+    const records = await deps.accessControlStore.listSessionAccess({
       tenant_id: requestContext.tenant_id,
       session_id: sessionId,
     });

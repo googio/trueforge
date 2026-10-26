@@ -2,11 +2,11 @@ import type { CreatedBySubject } from '@truefoundry/trueforge-core/agent-session
 import type { ExpressionBuilder, Kysely, Transaction } from 'kysely';
 import type {
   GrantSessionAccessInput,
-  IAccessControlEntryStore,
+  IAccessControlStore,
   ListSessionAccessInput,
   RevokeSessionAccessInput,
   SessionAccessRecord,
-} from '../../accessControlEntryStore';
+} from '../../accessControlStore';
 import { jsonbBind, jsonText, nowIso } from '../sqlExpressions';
 import type { Database } from '../types';
 
@@ -22,7 +22,7 @@ function recordColumns(eb: ExpressionBuilder<Database, 'access_control'>) {
   ];
 }
 
-export class SqliteAccessControlEntryStore implements IAccessControlEntryStore<Transaction<Database>> {
+export class SqliteAccessControlStore implements IAccessControlStore<Transaction<Database>> {
   readonly #db: Kysely<Database>;
 
   constructor(db: Kysely<Database>) {
