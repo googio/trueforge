@@ -344,7 +344,7 @@ export class RemoteMCP implements ToolSource {
                   if (fields.error.includes('Body Timeout')) {
                     this.logger.warn(msg, logFields);
                   } else {
-                    this.logger.error(msg, logFields);
+                    this.logger.warn(msg, logFields);
                   }
                 },
               }),

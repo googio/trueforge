@@ -56,7 +56,7 @@ import type { IToolSet, MCPAuthRequired } from '../mcp/IMCPServer';
 import { elapsedSeconds, getOperationMetrics, type LlmRequestOutcome } from '../observability/operationMetrics';
 import type { HarnessSandbox, SandboxInfo } from '../sandbox/Sandbox';
 import type { AgentTracing } from '../tracing/AgentTracing';
-import { describeUnknownError, extractErrorLogFields, isReportableError } from '../util/errorLogFields';
+import { describeUnknownError, extractErrorLogFields, isAbortError, isReportableError } from '../util/errorLogFields';
 import type { AgentDefinition } from './AgentDefinition';
 import type {
   AgentThreadConstructorInput,
@@ -1577,10 +1577,19 @@ export class AgentThread {
       // Providers / transports often reject with plain objects; instanceof Error would
       // otherwise collapse those into an opaque "Unknown error occurred" in Agent Steps.
       // Model-provider failures are classified at the LLM call. turn.done only keeps the message.
-      this.logger.error('Agent thread execution failed', {
+      // An abort is the client or provider closing the stream, so it stays a warning.
+      const aborted = isLlmCallAborted({ error, signal });
+      const fields = {
         ...extractErrorLogFields(error),
-        ...(error instanceof ModelProviderError || !isReportableError(error) ? {} : { reportable_error: { error } }),
-      });
+        ...(aborted || error instanceof ModelProviderError || !isReportableError(error)
+          ? {}
+          : { reportable_error: { error } }),
+      };
+      if (aborted) {
+        this.logger.warn('Agent thread execution failed', fields);
+      } else {
+        this.logger.error('Agent thread execution failed', fields);
+      }
       yield this.generateErrorEvent(describeUnknownError(error));
     } finally {
       this.contextBusy = false;
@@ -1626,8 +1635,5 @@ function claimCapabilityState(
 }
 
 function isLlmCallAborted({ error, signal }: { error: unknown; signal: AbortSignal | undefined }): boolean {
-  if (signal?.aborted === true) {
-    return true;
-  }
-  return error instanceof Error && error.name === 'AbortError';
+  return signal?.aborted === true || isAbortError(error);
 }

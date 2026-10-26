@@ -36,7 +36,7 @@ import type {
 import type { Logger } from 'winston';
 import { ModelProviderError } from '../errors';
 import { getOperationMetrics, httpStatusClass, type OutboundHttpStatusClass } from '../observability/operationMetrics';
-import { describeUnknownError, extractErrorLogFields, isReportableError } from '../util/errorLogFields';
+import { describeUnknownError, extractErrorLogFields, isAbortError, isReportableError } from '../util/errorLogFields';
 import { modelSsrfFetch } from '../util/outboundFetch';
 import type { ILLM, LLMCreateParams, LLMCreateParamsStreaming } from './ILLM';
 import {
@@ -1016,10 +1016,6 @@ export function toStreamError(raw: unknown): Error {
   return new ModelProviderError(describeStreamError(raw), { cause: raw });
 }
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
-}
-
 /** HTTP class from an AI SDK call error. Stream parts wrap that error once as `cause`. */
 function llmStatusClass(error: unknown): OutboundHttpStatusClass {
   if (APICallError.isInstance(error)) {
@@ -1484,7 +1480,7 @@ export class VercelAILLM implements ILLM {
     } catch (error) {
       this.recordStreamError({ error, phase: 'api_call' });
       const streamError = toStreamError(error);
-      if (this.signal?.aborted) {
+      if (this.signal?.aborted === true || isAbortError(error)) {
         this.logger.debug('LLM call aborted', extractErrorLogFields(streamError));
       } else {
         this.logger.error('Error creating streaming chat completion', {
@@ -1527,7 +1523,7 @@ export class VercelAILLM implements ILLM {
     } catch (error) {
       this.recordStreamError({ error, phase: 'stream_part' });
       const streamError = toStreamError(error);
-      if (this.signal?.aborted) {
+      if (this.signal?.aborted === true || isAbortError(error)) {
         this.logger.debug('LLM stream aborted', extractErrorLogFields(streamError));
       } else {
         this.logger.error('Error reading LLM stream', {

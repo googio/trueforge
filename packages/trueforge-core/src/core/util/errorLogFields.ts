@@ -141,6 +141,29 @@ export function isReportableError(error: unknown): boolean {
   return status === undefined || status > 499;
 }
 
+function isLlmStreamAbortMessage(message: string): boolean {
+  return stripErrorPrefix({ prefix: MODEL_ERROR_PREFIX, message }) === 'LLM stream aborted';
+}
+
+/**
+ * Client or provider cancelled the LLM stream. `cause` is walked so a wrapped abort still matches.
+ */
+export function isAbortError(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (typeof current === 'object' && current !== null && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof Error && (current.name === 'AbortError' || isLlmStreamAbortMessage(current.message))) {
+      return true;
+    }
+    if (!('cause' in current)) {
+      return false;
+    }
+    current = Reflect.get(current, 'cause');
+  }
+  return false;
+}
+
 export function extractErrorLogFields(error: unknown): ErrorLogFields {
   if (error instanceof Error) {
     const chain = describeErrorChain(error, new Set());
