@@ -41,7 +41,6 @@ import {
   type GatewaySessionEventItem,
   type ProjectSessionMessagesOptions,
   type RequiredActionsOverlay,
-  type SessionHistoryPagination,
   type SessionSnapshot,
   type SessionTurnRecord,
 } from './sessionSnapshot.js';
@@ -248,7 +247,7 @@ function oldestCompleteTurnGroupState(
 }
 
 async function fetchSessionEventsPage(
-  server: AgentChatServer,
+  server: Pick<AgentChatServer, 'listEvents'>,
   sessionId: string,
   options?: FetchSessionEventsOptions & { pageToken?: string },
 ): Promise<SessionEventsPageResult> {
@@ -272,7 +271,7 @@ async function fetchSessionEventsPage(
  * turn group (or history is exhausted).
  */
 async function fetchSessionEventsWindow(
-  server: AgentChatServer,
+  server: Pick<AgentChatServer, 'listEvents'>,
   sessionId: string,
   options?: FetchSessionEventsOptions & { pageToken?: string },
 ): Promise<{
@@ -631,24 +630,59 @@ async function resolveSessionTip(options: {
  * `onProgress` fires after each complete turn, then once with the paintable
  * window before `getTurn`, so callers can clear loading before the tip is confirmed.
  */
+function snapshotFromEventsWindow(
+  window: Awaited<ReturnType<typeof fetchSessionEventsWindow>>,
+  onProgress?: (snap: SessionSnapshot) => void,
+): SessionSnapshot {
+  const snapshot = createEmptySessionSnapshot();
+  ingestSessionEventsIntoSnapshot(snapshot, window.itemsAsc, onProgress);
+  return replaceSessionSnapshot(snapshot, {
+    historyEvents: window.itemsAsc,
+    historyPagination: {
+      hasOlder: window.hasOlder,
+      ...(window.olderPageToken != null ? { olderPageToken: window.olderPageToken } : {}),
+    },
+  });
+}
+
+/**
+ * Builds an idle session's snapshot from pages the host already holds via `peekEvents`.
+ * Undefined when any needed page is not held or the tip is still open.
+ */
+export async function buildCachedSnapshotFromSessionEvents(
+  server: AgentChatServer,
+  sessionId: string,
+): Promise<SessionSnapshot | undefined> {
+  const peekEvents = server.peekEvents?.bind(server);
+  if (peekEvents == null) {
+    return undefined;
+  }
+  const missedPageTokens: (string | undefined)[] = [];
+  const window = await fetchSessionEventsWindow(
+    {
+      listEvents: request => {
+        const page = peekEvents(request);
+        if (page == null) {
+          missedPageTokens.push(request.pageToken);
+        }
+        return Promise.resolve(page ?? { data: [] });
+      },
+    },
+    sessionId,
+  );
+  if (missedPageTokens.length > 0 || window.itemsAsc.length === 0 || findOpenTurnCreated(window.itemsAsc) != null) {
+    return undefined;
+  }
+  return snapshotFromEventsWindow(window);
+}
+
 export async function buildSnapshotFromSessionEvents(
   server: AgentChatServer,
   sessionId: string,
   onProgress?: (snap: SessionSnapshot) => void,
 ): Promise<SessionSnapshot> {
   const window = await fetchSessionEventsWindow(server, sessionId);
-  const historyPagination: SessionHistoryPagination = {
-    hasOlder: window.hasOlder,
-    ...(window.olderPageToken != null ? { olderPageToken: window.olderPageToken } : {}),
-  };
-
-  const snapshot = createEmptySessionSnapshot();
-  ingestSessionEventsIntoSnapshot(snapshot, window.itemsAsc, onProgress);
-
-  const withHistory = replaceSessionSnapshot(snapshot, {
-    historyEvents: window.itemsAsc,
-    historyPagination,
-  });
+  const withHistory = snapshotFromEventsWindow(window, onProgress);
 
   const open = findOpenTurnCreated(window.itemsAsc);
   // The open tip is not in `turns` until `turn.done`. Attach it from the

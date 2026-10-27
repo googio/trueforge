@@ -384,6 +384,16 @@ export interface AgentChatServer<
     lastTurnId?: string;
     limit?: number;
   }): Promise<ListResult<SessionEventItem>>;
+  /**
+   * Returns a `listEvents` page the host already holds, without a network call, so a reopened
+   * session paints at once. The runtime still reloads through `getSession` and `listEvents`.
+   */
+  peekEvents?(req: {
+    sessionId: string;
+    pageToken?: string;
+    lastTurnId?: string;
+    limit?: number;
+  }): ListResult<SessionEventItem> | undefined;
 
   /** Optional per-turn event listing (hydrate in-flight turn content). */
   listTurnEvents?(req: {

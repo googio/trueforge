@@ -17,6 +17,7 @@ import type {
 import { collectPendingToolResponses } from '../src/collectPending.js';
 import { ROOT_THREAD_ID } from '../src/constants.js';
 import {
+  buildCachedSnapshotFromSessionEvents,
   buildSnapshotFromSessionEvents,
   buildSnapshotThroughTurn,
   buildTurnAssistantContent,
@@ -3755,6 +3756,63 @@ describe('buildSnapshotFromSessionEvents', () => {
       role: 'assistant',
       metadata: { custom: { sandboxId: 'sbx-123', turnId: 't2' } },
     });
+  });
+});
+
+describe('buildCachedSnapshotFromSessionEvents', () => {
+  const turnCreated: SessionEventItem = {
+    turnId: 't1',
+    event: {
+      type: 'turn.created',
+      id: 'evt-c1',
+      turnId: 't1',
+      input: [{ type: 'user.message', content: 'hello' }],
+      state: { status: 'running' },
+      createdAt,
+    },
+  };
+  const finishedTurn: SessionEventItem[] = [
+    turnCreated,
+    { turnId: 't1', event: modelMessage({ id: 'm1', threadId: ROOT_THREAD_ID, content: 'hi there' }) },
+    { turnId: 't1', event: turnDone('evt-d1') },
+  ];
+
+  function serverPeeking(items: SessionEventItem[] | undefined) {
+    const listEvents = vi.fn(sessionEventsPage(items ?? []));
+    const server: AgentChatServer = {
+      ...mockServerWithEvents([], items ?? []),
+      listEvents,
+      peekEvents: () => (items == null ? undefined : { data: [...items].reverse() }),
+    };
+    return { server, listEvents };
+  }
+
+  it('builds the same snapshot as a reload without calling listEvents', async () => {
+    const { server, listEvents } = serverPeeking(finishedTurn);
+
+    const cached = await buildCachedSnapshotFromSessionEvents(server, SESSION_ID);
+    listEvents.mockClear();
+
+    expect(cached).toEqual(await buildSnapshotFromSessionEvents(mockServerWithEvents([], finishedTurn), SESSION_ID));
+    expect(listEvents).not.toHaveBeenCalled();
+  });
+
+  it('skips the cache when the host does not hold the page', async () => {
+    const { server } = serverPeeking(undefined);
+
+    await expect(buildCachedSnapshotFromSessionEvents(server, SESSION_ID)).resolves.toBeUndefined();
+  });
+
+  it('skips the cache while the tip is still running', async () => {
+    const { server } = serverPeeking([turnCreated]);
+
+    await expect(buildCachedSnapshotFromSessionEvents(server, SESSION_ID)).resolves.toBeUndefined();
+  });
+
+  it('skips the cache when the host cannot peek', async () => {
+    await expect(
+      buildCachedSnapshotFromSessionEvents(mockServerWithEvents([], finishedTurn), SESSION_ID),
+    ).resolves.toBeUndefined();
   });
 });
 

@@ -7,6 +7,7 @@ import type { AgentChatServer, Turn } from '../src/server/index.js';
 import { collectPendingToolResponses } from '../src/collectPending.js';
 import { ROOT_THREAD_ID } from '../src/constants.js';
 import {
+  buildCachedSnapshotFromSessionEvents,
   prependOlderSessionHistory,
   TurnFailedError,
   TurnStreamDisconnectedError,
@@ -54,6 +55,7 @@ vi.mock('../src/convertTurnMessages.js', async importOriginal => {
   return {
     ...actual,
     prependOlderSessionHistory: vi.fn(actual.prependOlderSessionHistory),
+    buildCachedSnapshotFromSessionEvents: vi.fn(actual.buildCachedSnapshotFromSessionEvents),
   };
 });
 
@@ -509,6 +511,49 @@ describe('useTrueForgeAgentMessages', () => {
     });
 
     await waitFor(() => expect(resumeTurnStream).toHaveBeenCalled());
+  });
+
+  it('paints cached history at once and replaces it with the confirmed load', async () => {
+    vi.mocked(buildCachedSnapshotFromSessionEvents).mockResolvedValueOnce(snapshotWithUserTurn('from cache'));
+    let resolveLoad: (snapshot: SessionSnapshot) => void = () => undefined;
+    vi.mocked(loadSessionSnapshot).mockImplementation((_server, _sessionId, onProgress) => {
+      onProgress?.(createEmptySessionSnapshot());
+      return new Promise(resolve => {
+        resolveLoad = resolve;
+      });
+    });
+
+    const { result } = renderHook(() => useTrueForgeAgentMessages({ server: mockServer, sessionId: 'session-1' }));
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    // Partial progress must not shrink the cached history.
+    expect(result.current.messages[0]).toMatchObject({ role: 'user', content: [{ type: 'text', text: 'from cache' }] });
+
+    await act(async () => {
+      resolveLoad(snapshotWithUserTurn('confirmed'));
+    });
+
+    expect(result.current.messages[0]).toMatchObject({ role: 'user', content: [{ type: 'text', text: 'confirmed' }] });
+  });
+
+  it('clears cached history when the confirming load fails', async () => {
+    vi.mocked(buildCachedSnapshotFromSessionEvents).mockResolvedValueOnce(snapshotWithUserTurn('from cache'));
+    let rejectLoad: (error: Error) => void = () => undefined;
+    vi.mocked(loadSessionSnapshot).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectLoad = reject;
+        }),
+    );
+
+    const { result } = renderHook(() => useTrueForgeAgentMessages({ server: mockServer, sessionId: 'session-1' }));
+
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+    await act(async () => {
+      rejectLoad(new Error('Session not found'));
+    });
+
+    expect(result.current.messages).toHaveLength(0);
   });
 
   it('does not apply a late load over a send started after paint', async () => {

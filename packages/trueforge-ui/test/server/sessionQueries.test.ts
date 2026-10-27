@@ -277,6 +277,48 @@ describe('withSessionCache history', () => {
     expect(listEvents).toHaveBeenCalledTimes(3);
   });
 
+  it('peeks the newest page this client confirmed without a request', async () => {
+    const { server, listEvents } = historyServer();
+
+    expect(server.peekEvents?.({ sessionId: 's1', limit: 50 })).toBeUndefined();
+    await openSession(server);
+
+    expect(server.peekEvents?.({ sessionId: 's1', limit: 50 })).toEqual(idlePage);
+    expect(listEvents).toHaveBeenCalledTimes(1);
+  });
+
+  it('peeks a confirmed page even after its version check has expired', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const { server } = historyServer();
+
+    await openSession(server);
+    vi.setSystemTime(10 * 60_000);
+
+    expect(server.peekEvents?.({ sessionId: 's1', limit: 50 })).toEqual(idlePage);
+  });
+
+  it('peeks nothing for a running tip or after this client starts a turn', async () => {
+    const running = historyServer({ page: runningPage });
+    await openSession(running.server);
+    expect(running.server.peekEvents?.({ sessionId: 's1', limit: 50 })).toBeUndefined();
+
+    const { server } = historyServer();
+    await openSession(server);
+    server.createTurn({ sessionId: 's1' });
+    expect(server.peekEvents?.({ sessionId: 's1', limit: 50 })).toBeUndefined();
+  });
+
+  it('peeks older pages once they are cached', async () => {
+    const { server } = historyServer();
+    await openSession(server);
+    expect(server.peekEvents?.({ sessionId: 's1', limit: 50, pageToken: 'older' })).toBeUndefined();
+
+    await server.listEvents({ sessionId: 's1', limit: 50, pageToken: 'older' });
+
+    expect(server.peekEvents?.({ sessionId: 's1', limit: 50, pageToken: 'older' })).toEqual(idlePage);
+  });
+
   it('keeps history across new chats', async () => {
     const { server, listEvents } = historyServer();
 

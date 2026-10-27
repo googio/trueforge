@@ -14,6 +14,7 @@ import type { AgentChatServer } from './server/types.js';
 
 import { ROOT_THREAD_ID } from './constants.js';
 import {
+  buildCachedSnapshotFromSessionEvents,
   buildEditedUserMessageContent,
   buildSnapshotThroughTurn,
   CANCELLATION_REASON_CUSTOM_KEY,
@@ -794,10 +795,19 @@ export function useTrueForgeAgentMessages({
     setIsLoading(true);
     setIsLoadingOlderHistory(false);
 
+    let paintedCached = false;
     try {
       const conversationSessionId = await resolveActiveSessionId(sessionId, resolveConversationSessionIdRef.current);
+      // Paint history the host already holds; the load below still confirms it.
+      const cachedSnapshot = await buildCachedSnapshotFromSessionEvents(server, conversationSessionId);
+      if (cachedSnapshot != null && generation === loadGenerationRef.current) {
+        paintedCached = true;
+        setSnapshot(cachedSnapshot);
+        setIsLoading(false);
+      }
       const loadedSnapshot = await loadSessionSnapshot(server, conversationSessionId, snap => {
-        if (generation !== loadGenerationRef.current) {
+        // Partial progress would shrink history already painted from cache.
+        if (generation !== loadGenerationRef.current || paintedCached) {
           return;
         }
         // The events window is paintable before getTurn confirms the tip.
@@ -856,6 +866,10 @@ export function useTrueForgeAgentMessages({
       }
     } catch (error) {
       if (generation === loadGenerationRef.current) {
+        if (paintedCached) {
+          // The session may be gone or no longer readable; do not leave unconfirmed history up.
+          setSnapshot(createEmptySessionSnapshot());
+        }
         if (isEarlyInitialLoad) {
           // Allow retryLoad while still backgrounded (before isMain promotion).
           initialLoadStartedForRef.current = undefined;

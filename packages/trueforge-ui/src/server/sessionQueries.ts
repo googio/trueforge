@@ -11,6 +11,9 @@ function listKeyParams(request: ListSessionsParams | undefined): ListSessionsPar
   return rest;
 }
 
+/** Chat history stays cached long enough that switching back to a recent chat skips `listEvents`. */
+const SESSION_HISTORY_GC_TIME_MS = 30 * 60_000;
+
 /** Reads one session through the shared cache; pass `staleTime: 0` when the caller needs fresh server state. */
 export function fetchSessionDetail({
   queryClient,
@@ -26,18 +29,36 @@ export function fetchSessionDetail({
   return queryClient.fetchQuery({
     queryKey: queryKeys.sessions.detail(sessionId),
     queryFn: () => server.getSession({ sessionId }),
+    // Kept as long as history: its version locates the cached history to paint on reopen.
+    gcTime: SESSION_HISTORY_GC_TIME_MS,
     ...(staleTime === undefined ? {} : { staleTime }),
   });
 }
 
-/** Chat history stays cached long enough that switching back to a recent chat skips `listEvents`. */
-const SESSION_HISTORY_GC_TIME_MS = 30 * 60_000;
 /** History loads call `getSession` right before `listEvents`; older versions are not trusted. */
 const SESSION_VERSION_MAX_AGE_MS = 30_000;
 
 type SessionEventsPage = Awaited<ReturnType<AgentUIServer['listEvents']>>;
 
 type SessionDetail = Awaited<ReturnType<AgentUIServer['getSession']>>;
+
+/** Older pages are keyed by token alone; the newest page also by the session version it was read against. */
+function historyPageKey({
+  request,
+  version,
+}: {
+  request: Parameters<AgentUIServer['listEvents']>[0];
+  version: string | undefined;
+}) {
+  const { sessionId, pageToken, lastTurnId, limit } = request;
+  return queryKeys.sessionHistory.page({
+    sessionId,
+    ...(pageToken == null || pageToken === '' ? {} : { pageToken }),
+    ...(lastTurnId === undefined ? {} : { lastTurnId }),
+    ...(limit === undefined ? {} : { limit }),
+    ...(version === undefined ? {} : { version }),
+  });
+}
 
 /**
  * Session `updatedAt` moves when a turn starts or the session changes, but not while a running
@@ -128,7 +149,7 @@ export function withSessionCache({
       return fetchSessionDetail({ queryClient, server, sessionId: request.sessionId, staleTime: 0 });
     },
     async listEvents(request) {
-      const { sessionId, pageToken, lastTurnId, limit } = request;
+      const { sessionId, pageToken } = request;
       const olderPageToken = pageToken != null && pageToken !== '' ? pageToken : undefined;
       // The newest page is valid only for the session version just read.
       const session = olderPageToken === undefined ? confirmedSession({ queryClient, sessionId }) : undefined;
@@ -138,13 +159,7 @@ export function withSessionCache({
           ? session !== undefined
           : isStablePageToken({ queryClient, sessionId, pageToken: olderPageToken });
       if (!cacheable) return server.listEvents(request);
-      const queryKey = queryKeys.sessionHistory.page({
-        sessionId,
-        ...(olderPageToken === undefined ? {} : { pageToken: olderPageToken }),
-        ...(lastTurnId === undefined ? {} : { lastTurnId }),
-        ...(limit === undefined ? {} : { limit }),
-        ...(version === undefined ? {} : { version }),
-      });
+      const queryKey = historyPageKey({ request, version });
       const page = await queryClient.fetchQuery({
         queryKey,
         queryFn: () => server.listEvents(request),
@@ -155,6 +170,15 @@ export function withSessionCache({
         queryClient.removeQueries({ queryKey, exact: true });
       }
       return page;
+    },
+    // Any version this client last confirmed locates the page; the runtime still reloads it.
+    peekEvents(request) {
+      const isOlderPage = request.pageToken != null && request.pageToken !== '';
+      const version = isOlderPage
+        ? undefined
+        : queryClient.getQueryData<SessionDetail>(queryKeys.sessions.detail(request.sessionId))?.updatedAt;
+      if (!isOlderPage && version === undefined) return undefined;
+      return queryClient.getQueryData<SessionEventsPage>(historyPageKey({ request, version }));
     },
     createTurn(request) {
       forgetSession(request.sessionId);
