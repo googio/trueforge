@@ -12,7 +12,7 @@ import {
   createInitialTurnMetricsCheckpoint,
   foldTurnMetricsCheckpoint,
   resolveStoredTurnMetricsCheckpoint,
-} from '../turnMetricsAccounting';
+} from '../turnMetrics';
 import { assertCreateTurnThreadDelta } from './assertCreateTurnThreadDelta';
 import type {
   AddThreadsInput,
@@ -555,9 +555,9 @@ export class InMemorySessionStore<
     if (!list) {
       throw new TurnNotFoundError(input.turn_id);
     }
-    if (input.accounting.status !== input.state.status) {
+    if (input.turn_metrics.status !== input.state.status) {
       throw new SessionStoreInvariantError(
-        `accounting status ${input.accounting.status} does not match state ${input.state.status} for turn ${input.turn_id}`,
+        `turn_metrics status ${input.turn_metrics.status} does not match state ${input.state.status} for turn ${input.turn_id}`,
       );
     }
     const folded = foldTurnMetricsCheckpoint({
@@ -567,13 +567,13 @@ export class InMemorySessionStore<
         created_at: turn.created_at,
       }),
       transition:
-        input.accounting.status === 'paused'
+        input.turn_metrics.status === 'paused'
           ? {
               kind: 'pause',
-              observed_at: input.accounting.observed_at,
-              metrics: input.accounting.metrics,
+              observed_at: input.turn_metrics.observed_at,
+              metrics: input.turn_metrics.metrics,
             }
-          : { kind: 'resume', observed_at: input.accounting.observed_at },
+          : { kind: 'resume', observed_at: input.turn_metrics.observed_at },
     });
     turn.state = deepCopy(input.state);
     turn.snapshot.metrics_checkpoint = deepCopy(folded.checkpoint);

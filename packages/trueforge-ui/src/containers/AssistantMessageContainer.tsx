@@ -5,7 +5,6 @@ import { MessagePrimitive, useAuiState, type EnrichedPartState, type GroupByCont
 import {
   CANCELLATION_REASON_CUSTOM_KEY,
   CONTEXT_COMPACTION_DATA_NAME,
-  useTrueForgeResumeUnavailable,
 } from '@truefoundry/trueforge-assistant-ui-runtime';
 
 import { useTrackAnalytics } from '../analytics/AnalyticsProvider.js';
@@ -52,7 +51,6 @@ export function AssistantMessageContainer() {
   const MessageCancelledBanner = useSlot('MessageCancelledBanner');
   const MessageIndicator = useSlot('MessageIndicator');
   const isThreadRunning = useThreadIsRunning();
-  const resumeUnavailable = useTrueForgeResumeUnavailable();
   const error = useMessageError();
   const createdAt = useAuiState(s => s.message.createdAt);
   const sessionId = useAuiState(s => s.threadListItem.remoteId);
@@ -138,7 +136,7 @@ export function AssistantMessageContainer() {
               case 'data':
                 return <AssistantLeafPartContainer part={part} />;
               case 'indicator':
-                return resumeUnavailable ? null : <MessageIndicator />;
+                return <MessageIndicator />;
               default:
                 return null;
             }

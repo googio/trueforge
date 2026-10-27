@@ -178,7 +178,7 @@ export const TurnMetricsCheckpointSchema = z.object({
 });
 
 /** Pause sends the cumulative. Resume only opens the next running interval. */
-export const TurnNonTerminalAccountingSchema = z.discriminatedUnion('status', [
+export const TurnNonTerminalMetricsSchema = z.discriminatedUnion('status', [
   z.object({
     status: z.literal('paused'),
     observed_at: z.string(),
@@ -197,7 +197,7 @@ export type NonTerminalTurnState = Extract<TurnState, { status: 'running' | 'pau
 export type TerminalTurnState = Exclude<TurnState, NonTerminalTurnState>;
 export type TurnMetrics = z.infer<typeof TurnMetricsSchema>;
 export type TurnMetricsCheckpoint = z.infer<typeof TurnMetricsCheckpointSchema>;
-export type TurnNonTerminalAccounting = z.infer<typeof TurnNonTerminalAccountingSchema>;
+export type TurnNonTerminalMetrics = z.infer<typeof TurnNonTerminalMetricsSchema>;
 
 export function isNonTerminalTurnState(state: TurnState): state is NonTerminalTurnState {
   return state.status === 'running' || state.status === 'paused';

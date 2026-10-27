@@ -6,6 +6,7 @@ import { ToolSet } from '../../src/core/mcp/ToolSet';
 import { AgentThread } from '../../src/core/runtime/AgentThread';
 import { InternalEventType, type AgentThreadConstructorInput } from '../../src/core/runtime/AgentThread.types';
 import { AgentThreadOrchestrator } from '../../src/core/runtime/AgentThreadOrchestrator';
+import { createEmptyAgentThreadMetrics } from '../../src/core/runtime/metrics';
 import { NOOP_AGENT_TRACING } from '../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger, TEST_MODEL_NAME } from '../core/harnessMocks';
 import {
@@ -649,6 +650,7 @@ describe('AgentThreadOrchestrator.send: approval policy validation', () => {
       logger: makeSilentLogger(),
       pendingTurnEvents: [],
       mcpServers: [],
+      metricsBaseline: createEmptyAgentThreadMetrics(),
     });
   });
 
@@ -840,6 +842,7 @@ function makeApprovalHarness(finalReply: string): {
     logger: makeSilentLogger(),
     pendingTurnEvents: [],
     mcpServers: [],
+    metricsBaseline: createEmptyAgentThreadMetrics(),
   });
   return { orchestrator, thread, callTool };
 }
@@ -893,6 +896,7 @@ function makeApprovalHarnessWithUserToolSet(
     logger: makeSilentLogger(),
     pendingTurnEvents: [],
     mcpServers: mcpServers ?? [],
+    metricsBaseline: createEmptyAgentThreadMetrics(),
   });
   return { orchestrator, thread, callTool, toolSet };
 }

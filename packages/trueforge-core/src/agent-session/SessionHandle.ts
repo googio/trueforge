@@ -23,7 +23,7 @@ import { CancellationReason } from './schemas/turn';
 import type { ISessionStore, NewThreadInit, TurnContextAppend, TurnRecordWithoutSnapshot } from './store/ISessionStore';
 import { TurnNotFoundError, TurnNotRunningError, TurnOwnershipLostError } from './store/SessionStoreErrors';
 import { TurnHandle } from './TurnHandle';
-import { createInitialTurnMetricsCheckpoint } from './turnMetricsAccounting';
+import { createInitialTurnMetricsCheckpoint } from './turnMetrics';
 
 /** How many recent ancestors SessionHandle persists on each turn. Store-local. */
 const MAX_TURN_ANCESTORS = 20;

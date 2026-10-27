@@ -45,12 +45,12 @@ import {
   type NonTerminalTurnState,
   type TerminalTurnState,
   type TurnMetrics,
-  type TurnNonTerminalAccounting,
+  type TurnNonTerminalMetrics,
   type TurnState,
 } from './schemas/turn';
 import type { ISessionStore } from './store/ISessionStore';
 import { TurnNotRunningError, TurnOwnershipLostError } from './store/SessionStoreErrors';
-import { turnMetricsFromAgentThreadMetrics } from './turnMetricsAccounting';
+import { turnMetricsFromAgentThreadMetrics } from './turnMetrics';
 
 /** Streaming yield union — deltas pass through; never persisted. No sequence_number. */
 export type TurnStreamingEvent = PersistedTurnEvent | ModelMessageDeltaEvent;
@@ -530,7 +530,7 @@ export class TurnHandle<TTransaction = never, TTurnCustom extends object = Recor
     const state: NonTerminalTurnState = transition.status === 'paused' ? { status: 'paused' } : { status: 'running' };
     const updatedAt = new Date();
     const observed_at = updatedAt.toISOString();
-    const accounting: TurnNonTerminalAccounting =
+    const turn_metrics: TurnNonTerminalMetrics =
       state.status === 'paused'
         ? { status: 'paused', observed_at, metrics: orchestrator.getMetrics() }
         : { status: 'running', observed_at };
@@ -548,7 +548,7 @@ export class TurnHandle<TTransaction = never, TTurnCustom extends object = Recor
         active_executor_id: this.turn.active_executor_id,
         state,
         turn_update_event: turnUpdate,
-        accounting,
+        turn_metrics,
       }),
     );
     this.turn = { ...this.turn, state, updated_at: updatedAt };
@@ -617,7 +617,8 @@ export class TurnHandle<TTransaction = never, TTurnCustom extends object = Recor
             events: [event],
           }),
         );
-        return event;
+        yield event;
+        return;
       }
 
       case InternalEventType.AGENT_CONTEXT_APPEND: {

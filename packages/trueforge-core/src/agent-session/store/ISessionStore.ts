@@ -13,7 +13,7 @@ import type {
   CancellationReason,
   NonTerminalTurnState,
   TerminalTurnState,
-  TurnNonTerminalAccounting,
+  TurnNonTerminalMetrics,
 } from '../schemas/turn';
 
 /**
@@ -188,7 +188,7 @@ export interface UpdateTurnNonTerminalStateInput extends TurnProgressKeys {
   /** Caller-built turn.update; written atomically with the non-terminal state transition. */
   turn_update_event: TurnUpdateEvent;
   /** Pause carries the cumulative. Resume only opens `running_since`. */
-  accounting: TurnNonTerminalAccounting;
+  turn_metrics: TurnNonTerminalMetrics;
 }
 
 export interface AppendToEventsInput extends TurnProgressKeys {
