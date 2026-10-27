@@ -92,7 +92,7 @@ export {
 export { ToolSet } from './mcp/ToolSet';
 
 // LLM contracts
-export type { AgentMetadata, ILLM, LLMCreateParams, LLMCreateParamsStreaming } from './llm/ILLM';
+export type { AgentMetadata, ILLM, LLMCreateParams, LLMCreateParamsStreaming, LLMRequestOptions } from './llm/ILLM';
 export { ResponseFormatSchema, toOpenAIResponseFormat } from './llm/responseFormat';
 export type { ResponseFormat } from './llm/responseFormat';
 export { SUPPORTED_REASONING_EFFORTS, VERCEL_AI_PROVIDER_NAMES, VercelAILLM } from './llm/VercelAILLM';
@@ -100,12 +100,17 @@ export type { VercelAILLMConfig, VercelAIProviderConfig, VercelAIProviderName } 
 
 // Event contracts
 export {
+  ActionRequiredEventSchema,
+  CompactionTriggerSchema,
+  EventIdSchema,
   EventType,
   MCPAuthRequiredEventSchema,
   MCPInitializeEventSchema,
   ModelMessageDeltaEventSchema,
   ModelMessageEventSchema,
   SandboxCreatedEventSchema,
+  ThreadContextCompactionFinishedEventSchema,
+  ThreadContextCompactionStartedEventSchema,
   ThreadCreatedEventSchema,
   ThreadDoneEventSchema,
   ToolApprovalRequiredEventSchema,
@@ -119,9 +124,12 @@ export {
 } from './events/schema';
 export type {
   AgentOutputEvent,
+  CompactionTrigger,
   MCPAuthRequiredEvent,
   MCPServerAuthInfo,
   MCPServerInitInfo,
+  ThreadContextCompactionFinishedEvent,
+  ThreadContextCompactionStartedEvent,
   ThreadDoneEvent,
   ThreadOverwriteContextEvent,
   ToolApprovalPolicy,
