@@ -105,6 +105,7 @@ const SERVICE_FOUNDRY_OPERATIONS: {
   readonly getAgentPermissions: ServiceFoundryOperation;
   readonly getTenantPermissions: ServiceFoundryOperation;
   readonly vendToken: ServiceFoundryOperation;
+  readonly peekUsers: ServiceFoundryOperation;
 } = {
   listProviderIntegrations: 'model_providers',
   listGatewayInstallations: 'gateway_installations',
@@ -123,6 +124,7 @@ const SERVICE_FOUNDRY_OPERATIONS: {
   getAgentPermissions: 'agent_permissions',
   getTenantPermissions: 'tenant_permissions',
   vendToken: 'vend_token',
+  peekUsers: 'users',
 };
 
 const ServiceFoundryErrorSchema = z.object({
@@ -705,6 +707,7 @@ export class TrueFoundryServiceFoundryServerClient {
             offset: String(input.offset),
           };
     const payload = await this.#requestJson({
+      operation: SERVICE_FOUNDRY_OPERATIONS.peekUsers,
       url: this.#url(SUBJECTS_PEEK_PATH, search),
       accessToken: input.accessToken,
       method: 'GET',

@@ -1,6 +1,6 @@
 import { sql, type Kysely } from 'kysely';
 
-/** Mirrors db/postgres/migrations/20261022_000001_access_control.ts. */
+/** Mirrors db/postgres/migrations/20261027_000001_access_control.ts. */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await db.transaction().execute(async trx => {
     await sql`
