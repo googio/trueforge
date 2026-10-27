@@ -69,6 +69,18 @@ function turnMetricsFor(state: NonTerminalTurnState, observed_at = new Date().to
   return { status: 'running', observed_at };
 }
 
+function isoPlus(start: string, deltaMs: number): string {
+  return new Date(Date.parse(start) + deltaMs).toISOString();
+}
+
+function openRunningSince(turn: { snapshot: { metrics_checkpoint: { running_since: string | null } } }): string {
+  const runningSince = turn.snapshot.metrics_checkpoint.running_since;
+  if (runningSince === null) {
+    throw new Error('expected an open running interval');
+  }
+  return runningSince;
+}
+
 function contextContents(messages: ContextMessage[] | undefined): string[] {
   return (messages ?? []).map(message => {
     if ('role' in message && message.role === 'user' && typeof message.content === 'string') {
@@ -1701,6 +1713,8 @@ export function runStoreContractSuite<TTransaction>(
       const store = createStore();
       await seedSession(store);
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      const created = mustGet(await store.getTurn({ session_id: sessionId, turn_id: 'turn-1' }));
+      const pauseAt = isoPlus(openRunningSince(created), 400);
       const pausedState = makePausedTurnState();
       await store.updateTurnNonTerminalState({
         active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
@@ -1708,7 +1722,7 @@ export function runStoreContractSuite<TTransaction>(
         turn_id: 'turn-1',
         state: pausedState,
         turn_update_event: makeTurnUpdateEvent(pausedState),
-        turn_metrics: turnMetricsFor(pausedState),
+        turn_metrics: turnMetricsFor(pausedState, pauseAt),
       });
 
       await expect(
@@ -1722,18 +1736,18 @@ export function runStoreContractSuite<TTransaction>(
       expect(afterReject.metrics.total_turns).toBe(1);
 
       const runningState = { status: 'running' } as const;
+      const resumeAt = isoPlus(pauseAt, 300);
       await store.updateTurnNonTerminalState({
         active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
         session_id: sessionId,
         turn_id: 'turn-1',
         state: runningState,
         turn_update_event: makeTurnUpdateEvent(runningState),
-        turn_metrics: turnMetricsFor(runningState),
+        turn_metrics: turnMetricsFor(runningState, resumeAt),
       });
-      const turn1 = mustGet(await store.getTurn({ session_id: sessionId, turn_id: 'turn-1' }));
       const doneState = {
         ...makeDoneTurnState(),
-        completed_at: new Date(turn1.created_at.getTime() + 1500).toISOString(),
+        completed_at: isoPlus(resumeAt, 1100),
         metrics: { total_cost_in_usd: 1.25 },
       };
       await store.updateTurnTerminalState({
@@ -2279,6 +2293,8 @@ export function runStoreContractSuite<TTransaction>(
       const store = createStore();
       await seedSession(store);
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      const created = mustGet(await store.getTurn({ session_id: sessionId, turn_id: 'turn-1' }));
+      const pauseAt = isoPlus(openRunningSince(created), 500);
       const pausedState = makePausedTurnState();
       const turnUpdate = makeTurnUpdateEvent(pausedState);
       await store.updateTurnNonTerminalState({
@@ -2287,7 +2303,7 @@ export function runStoreContractSuite<TTransaction>(
         turn_id: 'turn-1',
         state: pausedState,
         turn_update_event: turnUpdate,
-        turn_metrics: turnMetricsFor(pausedState, turnUpdate.created_at),
+        turn_metrics: turnMetricsFor(pausedState, pauseAt),
       });
 
       const cancelledState = makeCancelledTurnState(CancellationReason.CancelledForNextTurn);
@@ -2316,9 +2332,8 @@ export function runStoreContractSuite<TTransaction>(
       expect(data.filter(event => event.type === EventType.TURN_DONE)).toHaveLength(1);
 
       const afterCancel = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
-      const elapsed_ms = Date.parse(record.state.completed_at) - record.created_at.getTime();
       expect(afterCancel.metrics).toEqual({
-        total_duration_ms: elapsed_ms > 0 ? Math.trunc(elapsed_ms) : 0,
+        total_duration_ms: 500,
         total_turns: 1,
       });
       await store.freezeAndGetTurn({
@@ -2587,9 +2602,11 @@ export function runStoreContractSuite<TTransaction>(
       const store = createStore();
       await seedSession(store);
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
+      const created = mustGet(await store.getTurn({ session_id: sessionId, turn_id: 'turn-1' }));
       const metricsBeforePause = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId })).metrics;
       const state = makePausedTurnState();
       const turnUpdate = makeTurnUpdateEvent(state);
+      const pauseAt = isoPlus(openRunningSince(created), 250);
 
       await store.updateTurnNonTerminalState({
         active_executor_id: TEST_ACTIVE_EXECUTOR_ID,
@@ -2597,7 +2614,7 @@ export function runStoreContractSuite<TTransaction>(
         turn_id: 'turn-1',
         state,
         turn_update_event: turnUpdate,
-        turn_metrics: turnMetricsFor(state, turnUpdate.created_at),
+        turn_metrics: turnMetricsFor(state, pauseAt),
       });
 
       const turn = mustGet(await store.getTurn({ session_id: sessionId, turn_id: 'turn-1' }));
@@ -2613,7 +2630,10 @@ export function runStoreContractSuite<TTransaction>(
       expect(data.some(event => event.type === EventType.TURN_DONE)).toBe(false);
 
       const session = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
-      expect(session.metrics).toEqual(metricsBeforePause);
+      expect(session.metrics).toEqual({
+        ...metricsBeforePause,
+        total_duration_ms: metricsBeforePause.total_duration_ms + 250,
+      });
     });
 
     it('writes paused → running and turn.update atomically without terminal metrics', async () => {
