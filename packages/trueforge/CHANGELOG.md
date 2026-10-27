@@ -1,5 +1,11 @@
 # @truefoundry/trueforge
 
+## 0.181.0-rc.2
+
+### Patch Changes
+
+- 8e2563e: Use an explicit server or controller resources table as-is, then resourceTierOverride, then global.resourceTier. The default tier is small.
+
 ## 0.181.0-rc.1
 
 ### Patch Changes
