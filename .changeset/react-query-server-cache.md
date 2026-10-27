@@ -1,5 +1,6 @@
 ---
+"@truefoundry/trueforge-assistant-ui-runtime": patch
 "@truefoundry/trueforge-ui": patch
 ---
 
-Cache server reads with React Query so repeated catalog, permission, session, agent, settings, schedule, environment, and metrics requests are deduplicated and refreshed after mutations. Reopening an idle chat from history reuses its cached events instead of calling `listEvents` again.
+Cache server reads with React Query, and reuse idle chat history via `lastTurnId` / `peekEvents` so reopening a session paints immediately and stays correct across tabs and pagination.
