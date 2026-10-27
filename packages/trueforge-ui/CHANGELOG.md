@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.180.1
+
+### Patch Changes
+
+- 204951d: Show sub-agent model time between tool-only replies on the session timeline.
+
 ## 0.180.0
 
 ### Patch Changes
