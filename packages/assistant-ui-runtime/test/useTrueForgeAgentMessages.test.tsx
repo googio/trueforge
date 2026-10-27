@@ -417,6 +417,27 @@ describe('useTrueForgeAgentMessages', () => {
     expect(loadSessionSnapshot).not.toHaveBeenCalled();
   });
 
+  it('reloads a lazily created session when its thread becomes main again', async () => {
+    const initializeSession = vi.fn().mockResolvedValue({ remoteId: 'session-new', externalId: undefined });
+    const { result, rerender } = renderHook(
+      ({ sessionId, isMain }: { sessionId: string | undefined; isMain: boolean }) =>
+        useTrueForgeAgentMessages({ server: mockServer, sessionId, isMain, initializeSession }),
+      { initialProps: { sessionId: undefined, isMain: true } },
+    );
+    await act(async () => {
+      await result.current.sendTurn({ userMessage: 'hello there' });
+    });
+    rerender({ sessionId: 'session-new', isMain: true });
+    expect(loadSessionSnapshot).not.toHaveBeenCalled();
+
+    rerender({ sessionId: 'session-new', isMain: false });
+    rerender({ sessionId: 'session-new', isMain: true });
+
+    await waitFor(() =>
+      expect(loadSessionSnapshot).toHaveBeenCalledWith(mockServer, 'session-new', expect.any(Function)),
+    );
+  });
+
   it('sendTurn forwards getTurnHeaders only when they resolve to a value', async () => {
     const getTurnHeaders = vi
       .fn()
@@ -554,6 +575,40 @@ describe('useTrueForgeAgentMessages', () => {
     });
 
     expect(result.current.messages).toHaveLength(0);
+  });
+
+  it('makes a send wait for the load confirming cached history', async () => {
+    vi.mocked(buildCachedSnapshotFromSessionEvents).mockResolvedValueOnce(snapshotWithUserTurn('from cache'));
+    let resolveLoad: (snapshot: SessionSnapshot) => void = () => undefined;
+    vi.mocked(loadSessionSnapshot).mockImplementation(
+      () =>
+        new Promise(resolve => {
+          resolveLoad = resolve;
+        }),
+    );
+
+    const { result } = renderHook(() => useTrueForgeAgentMessages({ server: mockServer, sessionId: 'session-1' }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let sent: Promise<void> = Promise.resolve();
+    act(() => {
+      sent = result.current.sendTurn({ userMessage: 'also check' });
+    });
+    expect(streamTurnContent).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveLoad(snapshotWithUserTurn('confirmed'));
+      await sent;
+    });
+
+    expect(streamTurnContent).toHaveBeenCalled();
+    const texts = result.current.messages.flatMap(message =>
+      message.content.flatMap(part => (part.type === 'text' ? [part.text] : [])),
+    );
+    // The confirmed load landed before the send, so its history replaced the cached copy.
+    expect(texts).toContain('confirmed');
+    expect(texts).not.toContain('from cache');
+    expect(texts).toContain('also check');
   });
 
   it('does not apply a late load over a send started after paint', async () => {
@@ -1458,6 +1513,53 @@ describe('useTrueForgeAgentMessages', () => {
     );
     expect(result.current.messages).toHaveLength(1);
     expect(result.current.messages[0]?.role).toBe('assistant');
+  });
+
+  it('reloads the session when the server rejects an approval answered elsewhere', async () => {
+    vi.mocked(loadSessionSnapshot).mockResolvedValue(
+      snapshotWithAssistantMessage(assistantMessageWithPendingApproval()),
+    );
+    vi.mocked(streamTurnContent).mockImplementation(async function* () {
+      yield* [];
+      throw new Error("no pending approval for tool_call_id 'approval-1'");
+    });
+
+    const { result } = renderHook(() => useTrueForgeAgentMessages({ server: mockServer, sessionId: 'session-1' }));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+    expect(loadSessionSnapshot).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      await result.current
+        .sendTurn({
+          inputs: [
+            {
+              type: 'user.tool_approval',
+              threadId: ROOT_THREAD_ID,
+              toolCallId: 'approval-1',
+              approval: { status: 'allow' },
+            },
+          ],
+        })
+        .catch(() => undefined);
+    });
+
+    await waitFor(() => expect(loadSessionSnapshot).toHaveBeenCalledTimes(2));
+  });
+
+  it('does not reload the session when a user message send fails', async () => {
+    vi.mocked(streamTurnContent).mockImplementation(async function* () {
+      yield* [];
+      throw new Error('gateway unavailable');
+    });
+
+    const { result } = renderHook(() => useTrueForgeAgentMessages({ server: mockServer, sessionId: 'session-1' }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.sendTurn({ userMessage: 'hello' }).catch(() => undefined);
+    });
+
+    expect(loadSessionSnapshot).toHaveBeenCalledOnce();
   });
 
   it('commits a continuation under the gateway turn id when no active stream exists', async () => {

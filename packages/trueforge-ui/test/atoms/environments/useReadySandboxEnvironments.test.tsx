@@ -3,9 +3,10 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
+import { useInvalidateEnvironments } from '@/atoms/environments/useInvalidateEnvironments.js';
 import { useReadySandboxEnvironments } from '@/atoms/environments/useReadySandboxEnvironments.js';
 import { ServerProvider } from '@/server/ServerContext.js';
-import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
+import { ShellModeProvider } from '@/server/ShellModeContext.js';
 import type { SandboxEnvironment } from '@/server/types.js';
 import { createMockAgentUIServer, createMockSandboxEnvironmentServer } from '../../server/mockServer.js';
 
@@ -66,7 +67,7 @@ describe('useReadySandboxEnvironments', () => {
     const { result } = renderHook(
       () => ({
         ready: useReadySandboxEnvironments(),
-        shell: useShellMode(),
+        invalidate: useInvalidateEnvironments(),
       }),
       { wrapper },
     );
@@ -77,7 +78,7 @@ describe('useReadySandboxEnvironments', () => {
     expect(result.current.ready.environments.map(e => e.name)).toEqual(['python-data']);
     expect(listEnvironments).toHaveBeenCalledTimes(1);
 
-    act(() => result.current.shell.invalidateEnvironmentsList());
+    act(() => result.current.invalidate());
 
     await waitFor(() => {
       expect(listEnvironments).toHaveBeenCalledTimes(2);

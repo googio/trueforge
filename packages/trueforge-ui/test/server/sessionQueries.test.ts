@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createServerQueryClient } from '@/server/queryClient.js';
-import { withSessionCache } from '@/server/sessionQueries.js';
+import { forgetCachedSession, withSessionCache } from '@/server/sessionQueries.js';
 
 import { createMockAgentUIServer } from './mockServer.js';
 
@@ -317,6 +317,28 @@ describe('withSessionCache history', () => {
     await server.listEvents({ sessionId: 's1', limit: 50, pageToken: 'older' });
 
     expect(server.peekEvents?.({ sessionId: 's1', limit: 50, pageToken: 'older' })).toEqual(idlePage);
+  });
+
+  it('peeks nothing once a session is forgotten outside the wrapper', async () => {
+    const queryClient = createServerQueryClient();
+    const server = withSessionCache({
+      server: createMockAgentUIServer({
+        getSession: vi.fn(async ({ sessionId }: { sessionId: string }) => ({
+          id: sessionId,
+          isMutable: true,
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+          lastTurnId: 't1',
+        })),
+        listEvents: vi.fn().mockResolvedValue(idlePage),
+      }),
+      queryClient,
+    });
+    await openSession(server);
+
+    forgetCachedSession({ queryClient, sessionId: 's1' });
+
+    expect(server.peekEvents?.({ sessionId: 's1', limit: 50 })).toBeUndefined();
   });
 
   it('keeps history across new chats', async () => {

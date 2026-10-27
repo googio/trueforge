@@ -1,6 +1,6 @@
 'use client';
 
-import { useQueries } from '@tanstack/react-query';
+import { keepPreviousData, useQueries } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useServerQueryClient } from '../../server/queryClient.js';
@@ -106,7 +106,7 @@ export function useAgentLibraryUsageStats({
   const queryClient = useServerQueryClient();
   const metricsEnabled = metrics != null;
   const lastRunEnabled = sessions != null;
-  const [range] = useState(usageWindow);
+  const [range, setRange] = useState(usageWindow);
   const ids = useMemo(() => [...new Set(agentIds)], [agentIds]);
 
   const metersQueries = useQueries(
@@ -117,6 +117,7 @@ export function useAgentLibraryUsageStats({
           queryKey: queryKeys.metrics.meters(request),
           queryFn: () => requireServer(metrics).getMeters(request),
           enabled: metricsEnabled,
+          placeholderData: keepPreviousData,
         };
       }),
     },
@@ -135,6 +136,7 @@ export function useAgentLibraryUsageStats({
           queryKey: queryKeys.metrics.chartData(request),
           queryFn: () => requireServer(metrics).getChartData(request),
           enabled: metricsEnabled,
+          placeholderData: keepPreviousData,
         };
       }),
     },
@@ -154,12 +156,13 @@ export function useAgentLibraryUsageStats({
     queryClient,
   );
 
-  // The library bumps refreshKey after agent changes; refetch in place so rows keep their numbers.
+  // The library bumps refreshKey after agent changes; move the window up to now, keeping rows'
+  // previous numbers until the new window loads.
   const lastRefreshKeyRef = useRef(refreshKey);
   useEffect(() => {
     if (lastRefreshKeyRef.current === refreshKey) return;
     lastRefreshKeyRef.current = refreshKey;
-    void queryClient.invalidateQueries({ queryKey: queryKeys.metrics.all() });
+    setRange(usageWindow());
     void queryClient.invalidateQueries({ queryKey: queryKeys.sessions.lists() });
   }, [queryClient, refreshKey]);
 

@@ -526,6 +526,8 @@ export function useTrueForgeAgentMessages({
   // Bumped once a send has applied its message. An earlier failure must not
   // discard the in-flight load or cancel the painted tip.
   const sendEpochRef = useRef(0);
+  // Settles once the load confirming cached history lands; a send waits so it cannot discard that load.
+  const confirmingCachedLoadRef = useRef<Promise<void> | null>(null);
   const streamReconnectPendingRef = useRef(false);
   const cancelRequestedRef = useRef(false);
   const lazilyCreatedSessionIdRef = useRef<string | undefined>(undefined);
@@ -759,6 +761,11 @@ export function useTrueForgeAgentMessages({
     const isEarlyInitialLoad =
       isMain === false && isInitialSession === true && initialLoadStartedForRef.current !== sessionId;
     if (isMain === false) {
+      // Each thread keeps its own hook instance, so leaving the lazily created
+      // session is the only signal that switching back must reload it.
+      if (sessionId === lazilyCreatedSessionIdRef.current) {
+        lazilyCreatedSessionIdRef.current = undefined;
+      }
       if (!isEarlyInitialLoad) {
         return;
       }
@@ -796,12 +803,18 @@ export function useTrueForgeAgentMessages({
     setIsLoadingOlderHistory(false);
 
     let paintedCached = false;
+    let confirmingCachedLoad: Promise<void> | undefined;
+    const cachedLoadConfirmation: { settle?: () => void } = {};
     try {
       const conversationSessionId = await resolveActiveSessionId(sessionId, resolveConversationSessionIdRef.current);
       // Paint history the host already holds; the load below still confirms it.
       const cachedSnapshot = await buildCachedSnapshotFromSessionEvents(server, conversationSessionId);
       if (cachedSnapshot != null && generation === loadGenerationRef.current) {
         paintedCached = true;
+        confirmingCachedLoad = new Promise<void>(resolve => {
+          cachedLoadConfirmation.settle = resolve;
+        });
+        confirmingCachedLoadRef.current = confirmingCachedLoad;
         setSnapshot(cachedSnapshot);
         setIsLoading(false);
       }
@@ -822,6 +835,8 @@ export function useTrueForgeAgentMessages({
 
       createdAtByMessageIdRef.current = new Map();
       setSnapshot(loadedSnapshot);
+      // A send waiting on this load continues before the next render; it must build on this snapshot.
+      snapshotRef.current = loadedSnapshot;
       runningTurnRef.current = loadedSnapshot.runningTurn;
 
       // History (and any seeded pendingUser for the in-flight turn) is
@@ -879,6 +894,10 @@ export function useTrueForgeAgentMessages({
       }
       throw error;
     } finally {
+      cachedLoadConfirmation.settle?.();
+      if (confirmingCachedLoad != null && confirmingCachedLoadRef.current === confirmingCachedLoad) {
+        confirmingCachedLoadRef.current = null;
+      }
       if (generation === loadGenerationRef.current) {
         setIsLoading(false);
       }
@@ -897,6 +916,12 @@ export function useTrueForgeAgentMessages({
       let pendingUserWasSet = false;
       let runStreamStarted = false;
       let pendingUserTurnId: string | undefined;
+      const isContinuation = 'inputs' in options || ('resumeMcpAuth' in options && options.resumeMcpAuth);
+
+      const confirmingCachedLoad = confirmingCachedLoadRef.current;
+      if (confirmingCachedLoad != null) {
+        await confirmingCachedLoad;
+      }
 
       // Invalidate the prior client stream before any await so a buffered RAF
       // cannot restore stale activeStream after the optimistic user message.
@@ -926,7 +951,6 @@ export function useTrueForgeAgentMessages({
           return;
         }
         const streamHeaders = turnHeaders != null ? { headers: turnHeaders } : {};
-        const isContinuation = 'inputs' in options || ('resumeMcpAuth' in options && options.resumeMcpAuth);
         const continuationTurnId = snapshotRef.current.activeStream?.turnId;
         const turnId = isContinuation
           ? // A paused stream is usually already committed (commitActiveStream
@@ -1099,6 +1123,12 @@ export function useTrueForgeAgentMessages({
       } catch (error) {
         if (!runStreamStarted && sendGeneration !== streamGenerationRef.current) {
           return;
+        }
+        if (isContinuation && !gatewayTurnAccepted.current) {
+          // A rejected resume ran nothing. Another tab may have answered it already,
+          // so reload instead of leaving actions the server no longer accepts.
+          lazilyCreatedSessionIdRef.current = undefined;
+          setLoadRetryTrigger(n => n + 1);
         }
         if ('userMessage' in options && !gatewayTurnAccepted.current) {
           const branchRollbackSnapshot = options.branchRollbackSnapshot;

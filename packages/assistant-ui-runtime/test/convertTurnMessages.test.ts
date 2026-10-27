@@ -3816,6 +3816,52 @@ describe('buildCachedSnapshotFromSessionEvents', () => {
   });
 });
 
+describe('session history split by a page boundary', () => {
+  function userTurn({ turnId, text, messageIds }: { turnId: string; text: string; messageIds: string[] }) {
+    return [
+      {
+        turnId,
+        event: {
+          type: 'turn.created',
+          id: `${turnId}-created`,
+          turnId,
+          input: [{ type: 'user.message', content: text }],
+          state: { status: 'running' },
+          createdAt,
+        },
+      },
+      ...messageIds.map(id => ({
+        turnId,
+        event: modelMessage({ id, threadId: ROOT_THREAD_ID, content: `answer ${id}` }),
+      })),
+      { turnId, event: turnDone(`${turnId}-done`) },
+    ] satisfies SessionEventItem[];
+  }
+
+  it('rebuilds the older turn whole when its newest events sit on the newer page', async () => {
+    // Page size 4 puts t1's done and last message on the first page, next to all of t2.
+    const items = [
+      ...userTurn({ turnId: 't1', text: 'long task', messageIds: ['m1', 'm2', 'm3', 'm4'] }),
+      ...userTurn({ turnId: 't2', text: 'Hello', messageIds: ['m5'] }),
+    ];
+    const server = {
+      ...mockServerWithEvents([], items),
+      listEvents: sessionEventsPage(items, { pageSize: 4 }),
+    } as unknown as AgentChatServer;
+
+    const newest = await buildSnapshotFromSessionEvents(server, SESSION_ID);
+    expect(newest.turns.map(turn => turn.id)).toEqual(['t2']);
+    expect(newest.historyPagination?.hasOlder).toBe(true);
+
+    const withOlder = await prependOlderSessionHistory(server, SESSION_ID, newest);
+
+    expect(withOlder.turns.map(turn => turn.id)).toEqual(['t1', 't2']);
+    expect(withOlder.turns[0]?.state.status).toBe('done');
+    expect(withOlder.turns[0]?.rootModelMessageIds).toEqual(['m1', 'm2', 'm3', 'm4']);
+    expect(withOlder.historyPagination?.hasOlder).toBe(false);
+  });
+});
+
 describe('buildSnapshotThroughTurn', () => {
   /** Linear session t1 -> t2 -> t3, oldest-first. */
   function linearTurns(): TurnFixture[] {

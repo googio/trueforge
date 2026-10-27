@@ -191,11 +191,6 @@ type ShellModeContextValue = {
    */
   agentsListEpoch: number;
   invalidateAgentsList: () => void;
-  /**
-   * Bumped when sandbox environments may have changed (create/update/delete/ready).
-   * Agent environment pickers should re-fetch when this changes.
-   */
-  invalidateEnvironmentsList: () => void;
 };
 
 const ShellModeContext = createContext<ShellModeContextValue | null>(null);
@@ -458,10 +453,6 @@ export function ShellModeProvider({
   const invalidateAgentsList = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.agents.all() });
     setAgentsListEpoch(n => n + 1);
-  }, [queryClient]);
-
-  const invalidateEnvironmentsList = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all() });
   }, [queryClient]);
 
   const lockedAgentName = agentConfig.mode === 'SingleAgent' ? agentConfig.name : '';
@@ -923,7 +914,6 @@ export function ShellModeProvider({
       pendingSessionEpoch,
       agentsListEpoch,
       invalidateAgentsList,
-      invalidateEnvironmentsList,
     }),
     [
       effectiveMode,
@@ -969,7 +959,6 @@ export function ShellModeProvider({
       pendingSessionEpoch,
       agentsListEpoch,
       invalidateAgentsList,
-      invalidateEnvironmentsList,
     ],
   );
 

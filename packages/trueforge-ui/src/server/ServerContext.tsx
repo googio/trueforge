@@ -8,6 +8,7 @@ import {
   createServerQueryClient,
   rescopeServerQueryClient,
   ServerQueryClientContext,
+  useMountServerQueryClient,
   useServerQueryClient,
 } from './queryClient.js';
 import { queryKeys } from './queryKeys.js';
@@ -31,6 +32,7 @@ const ServerCapabilitiesContext = createContext<{
 
 export function ServerProvider({ server, children }: { server: AgentUIServer; children: ReactNode }) {
   const [queryClient] = useState(createServerQueryClient);
+  useMountServerQueryClient(queryClient);
   const [scope, setScope] = useState({ server, generation: 0 });
   if (scope.server !== server) {
     // A swapped server must never read the previous server's cache.

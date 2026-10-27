@@ -29,6 +29,8 @@ export const queryKeys = {
     tenant: () => [ROOT, 'permissions', 'tenant'] as const,
     list: ({ resourceType, resourceIds }: { resourceType: PermissionResourceType; resourceIds: readonly string[] }) =>
       [ROOT, 'permissions', 'resources', resourceType, resourceIds] as const,
+    /** Resource type of a `list` key. */
+    listResourceType: (queryKey: readonly unknown[]): unknown => queryKey[3],
   },
   catalog: {
     all: () => [ROOT, 'catalog'] as const,

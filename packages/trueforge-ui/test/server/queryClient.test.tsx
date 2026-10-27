@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { onlineManager } from '@tanstack/react-query';
+import { act, render, renderHook, screen } from '@testing-library/react';
 import { useEffect } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DraftCatalogProvider, useDraftCatalog } from '@/atoms/draft/DraftCatalogProvider.js';
+import { useServerQueryClient } from '@/server/queryClient.js';
 import { ServerProvider, useServerCapabilities } from '@/server/ServerContext.js';
 import type { AgentBuilderCapabilitiesResponse } from '@/server/types.js';
 
@@ -47,6 +49,35 @@ describe('ServerProvider query cache', () => {
     await screen.findByText('first:loaded');
     await screen.findByText('second:loaded');
     expect(getModels).toHaveBeenCalledTimes(1);
+  });
+
+  it('resumes a request paused while the browser was offline', async () => {
+    const getCapabilities = vi.fn(async () => capabilitiesResponse(true));
+    onlineManager.setOnline(false);
+    try {
+      render(
+        <ServerProvider server={createMockAgentUIServer({ getCapabilities })}>
+          <CapabilitiesProbe />
+        </ServerProvider>,
+      );
+      expect(screen.getByText('pending')).toBeTruthy();
+      expect(getCapabilities).not.toHaveBeenCalled();
+
+      act(() => onlineManager.setOnline(true));
+
+      await screen.findByText('true');
+    } finally {
+      onlineManager.setOnline(true);
+    }
+  });
+
+  it('keeps one isolated client per consumer outside ServerProvider', () => {
+    const { result, rerender } = renderHook(() => useServerQueryClient());
+    const first = result.current;
+
+    rerender();
+
+    expect(result.current).toBe(first);
   });
 
   it('does not reuse the previous server cache after a server swap', async () => {

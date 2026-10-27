@@ -9,8 +9,6 @@ import {
   DRAFT_SPEC_PREFERENCES_STORAGE_KEY,
   readDraftSpecPreferences,
 } from '@/server/draftSpecPreferences.js';
-import { useServerQueryClient } from '@/server/queryClient.js';
-import { queryKeys } from '@/server/queryKeys.js';
 import { ServerProvider, useServerCapabilities, useServerCapabilitiesSettled } from '@/server/ServerContext.js';
 import { ShellModeProvider, useOptionalShellMode, useShellMode, type AgentConfig } from '@/server/ShellModeContext.js';
 import type { AgentUIServer } from '@/server/types.js';
@@ -1001,16 +999,6 @@ describe('ShellModeProvider', () => {
     expect(result.current.agentsListEpoch).toBe(0);
     act(() => result.current.invalidateAgentsList());
     expect(result.current.agentsListEpoch).toBe(1);
-  });
-
-  it('invalidateEnvironmentsList marks cached environments stale', () => {
-    const { result } = renderHook(() => ({ shell: useShellMode(), queryClient: useServerQueryClient() }), {
-      wrapper: wrap(),
-    });
-    const key = queryKeys.environments.list({ limit: 10 });
-    result.current.queryClient.setQueryData(key, { data: [] });
-    act(() => result.current.shell.invalidateEnvironmentsList());
-    expect(result.current.queryClient.getQueryState(key)?.isInvalidated).toBe(true);
   });
 
   it('bindMutableAgent attaches identity without remounting', () => {

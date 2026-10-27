@@ -1,6 +1,6 @@
 'use client';
 
-import { keepPreviousData, queryOptions, useQuery } from '@tanstack/react-query';
+import { queryOptions, useQuery } from '@tanstack/react-query';
 import {
   createContext,
   createElement,
@@ -85,8 +85,12 @@ export function useResourcePermissions({
     {
       ...resourcePermissionsQuery({ server, resourceType, resourceIds: requestedIds }),
       enabled,
-      // Keep prior grants on screen while a new id set loads; `allows` still gates by requested ids.
-      placeholderData: keepPreviousData,
+      // Keep prior grants on screen while a new id set of the same resource type loads; `allows`
+      // still gates by requested ids. Another resource type's grants must never stand in.
+      placeholderData: (previous, previousQuery) =>
+        previousQuery != null && queryKeys.permissions.listResourceType(previousQuery.queryKey) === resourceType
+          ? previous
+          : undefined,
     },
     queryClient,
   );

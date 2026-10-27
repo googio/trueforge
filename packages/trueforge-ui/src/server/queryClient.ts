@@ -1,7 +1,7 @@
 'use client';
 
 import { hashKey, QueryClient, type DefaultOptions } from '@tanstack/react-query';
-import { createContext, useContext, useState } from 'react';
+import { createContext, useContext, useEffect, useRef } from 'react';
 
 const DEFAULT_STALE_TIME_MS = 30_000;
 const DEFAULT_GC_TIME_MS = 5 * 60_000;
@@ -40,9 +40,20 @@ export function rescopeServerQueryClient({ queryClient, scope }: { queryClient: 
 // Own context instead of QueryClientProvider so a host app's React Query client is never shadowed.
 export const ServerQueryClientContext = createContext<QueryClient | null>(null);
 
+/** QueryClientProvider is not used, so mount here; a mounted client resumes queries paused while offline. */
+export function useMountServerQueryClient(queryClient: QueryClient | null): void {
+  useEffect(() => {
+    if (queryClient == null) return undefined;
+    queryClient.mount();
+    return () => queryClient.unmount();
+  }, [queryClient]);
+}
+
 export function useServerQueryClient(): QueryClient {
   const provided = useContext(ServerQueryClientContext);
+  const isolatedRef = useRef<QueryClient | null>(null);
   // Outside ServerProvider each consumer gets an isolated client, matching uncached behavior.
-  const [isolated] = useState(createServerQueryClient);
-  return provided ?? isolated;
+  const queryClient = provided ?? (isolatedRef.current ??= createServerQueryClient());
+  useMountServerQueryClient(provided == null ? queryClient : null);
+  return queryClient;
 }

@@ -126,6 +126,28 @@ describe('useResourcePermissions', () => {
     expect(result.current.allows('new', 'MANAGE')).toBe(false);
   });
 
+  it('does not stand in grants of another resource type while the new type loads', async () => {
+    const listPermissions = listPermissionsMock(({ resourceType }) =>
+      resourceType === 'agent'
+        ? Promise.resolve({ data: { type: 'agent', permissions: { shared: ['MANAGE'] } } })
+        : new Promise<ListPermissionsResponse>(() => undefined),
+    );
+    const server = createMockAgentUIServer({ permissions: { listPermissions } });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ServerProvider server={server}>{children}</ServerProvider>
+    );
+    const { result, rerender } = renderHook(
+      ({ resourceType }: { resourceType: PermissionResourceType }) =>
+        useResourcePermissions({ resourceType, resourceIds: ['shared'] }),
+      { wrapper, initialProps: { resourceType: 'agent' } },
+    );
+    await waitFor(() => expect(result.current.allows('shared', 'MANAGE')).toBe(true));
+
+    rerender({ resourceType: 'session' });
+
+    expect(result.current.allows('shared', 'MANAGE')).toBe(false);
+  });
+
   it('keeps a locally created active session manageable while permissions load', () => {
     const server = createMockAgentUIServer({
       permissions: {

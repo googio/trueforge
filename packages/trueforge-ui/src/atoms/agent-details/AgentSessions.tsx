@@ -16,6 +16,7 @@ import { useOptionalResolvedRoutes } from '../../routing/ResolvedRoutesContext.j
 import { useServerQueryClient } from '../../server/queryClient.js';
 import { queryKeys } from '../../server/queryKeys.js';
 import { useAgentSessionsServer, useServer } from '../../server/ServerContext.js';
+import { forgetCachedSession } from '../../server/sessionQueries.js';
 import { useOptionalShellMode } from '../../server/ShellModeContext.js';
 import type { ListResult, SessionListEntry } from '../../server/types.js';
 import { useSlot } from '../../theme/SlotsProvider.js';
@@ -230,6 +231,8 @@ export function AgentSessions({
               pages: current.pages.map(page => ({ ...page, data: page.data.filter(item => item.id !== entry.id) })),
             },
       );
+      // The delete bypasses the chat's cache wrapper, so drop the chat's cached copy here.
+      forgetCachedSession({ queryClient, sessionId: entry.id });
       // Keep the optimistic removal here; other session views refetch when next read.
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions.all(), refetchType: 'none' });
       if (selectedSessionId === entry.id) {

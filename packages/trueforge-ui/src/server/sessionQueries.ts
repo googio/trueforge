@@ -104,6 +104,12 @@ function isStablePageToken({
     .some(([, page]) => page?.nextPageToken === pageToken);
 }
 
+/** Drops one session's cached detail and chat history, e.g. after it was deleted. */
+export function forgetCachedSession({ queryClient, sessionId }: { queryClient: QueryClient; sessionId: string }): void {
+  queryClient.removeQueries({ queryKey: queryKeys.sessions.detail(sessionId) });
+  queryClient.removeQueries({ queryKey: queryKeys.sessionHistory.session(sessionId) });
+}
+
 /**
  * Caches session lists and chat history for the runtime, and drops a session's cached
  * history whenever this client changes it.
@@ -117,25 +123,25 @@ export function withSessionCache({
 }): AgentUIServer {
   const { deleteSession, renameSession, subscribeToTurn } = server;
   const invalidateSessions = () => queryClient.invalidateQueries({ queryKey: queryKeys.sessions.all() });
-  // A turn reorders session lists when it starts and updates titles and metrics when it ends.
+  // A turn reorders session lists when it starts and updates titles and metrics when it ends. Mark
+  // them stale only: refetching every open list and last-run row twice per turn is too costly.
+  const markSessionsStale = () =>
+    queryClient.invalidateQueries({ queryKey: queryKeys.sessions.all(), refetchType: 'none' });
   async function* refreshSessionsAround(stream: AsyncIterable<TurnStreamData>): AsyncIterable<TurnStreamData> {
     let started = false;
     try {
       for await (const data of stream) {
         if (!started) {
           started = true;
-          void invalidateSessions();
+          void markSessionsStale();
         }
         yield data;
       }
     } finally {
-      void invalidateSessions();
+      void markSessionsStale();
     }
   }
-  const forgetSession = (sessionId: string) => {
-    queryClient.removeQueries({ queryKey: queryKeys.sessions.detail(sessionId) });
-    queryClient.removeQueries({ queryKey: queryKeys.sessionHistory.session(sessionId) });
-  };
+  const forgetSession = (sessionId: string) => forgetCachedSession({ queryClient, sessionId });
   return {
     ...server,
     listSessions(request) {

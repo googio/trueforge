@@ -166,17 +166,20 @@ export function ShellRouteSync({
       const requestedChatIdentity = chatIdentityRef.current;
       // Shared viewers can read a session but cannot subscribe/send. Prefer the
       // read-only share surface when MANAGE is missing and that route exists.
+      // Opening decides what the user may do, so read grants and session fresh; a grant revoked
+      // elsewhere must not open the session as resumable.
       const canManagePromise =
         permissions == null || sessions == null
           ? Promise.resolve(true)
           : queryClient
-              .fetchQuery(
-                resourcePermissionsQuery({ server: permissions, resourceType: 'session', resourceIds: [sessionId] }),
-              )
+              .fetchQuery({
+                ...resourcePermissionsQuery({ server: permissions, resourceType: 'session', resourceIds: [sessionId] }),
+                staleTime: 0,
+              })
               .then(grants => (grants[sessionId] ?? []).includes('MANAGE'))
               .catch(() => true);
 
-      void Promise.all([fetchSessionDetail({ queryClient, server, sessionId }), canManagePromise])
+      void Promise.all([fetchSessionDetail({ queryClient, server, sessionId, staleTime: 0 }), canManagePromise])
         .then(([session, canManage]) => {
           if (requestedSessionRef.current !== sessionId) {
             releaseAbandonedBootSession(sessionId);
