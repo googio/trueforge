@@ -208,6 +208,8 @@ export interface UpdateSessionRequest<TSpec extends AgentSpec = AgentSpec> {
   sessionId: string;
   agentSpec?: TSpec;
   title?: string;
+  /** When true, any subject in the tenant may read this session and its turns/events by id. */
+  shared?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1159,10 +1161,10 @@ export interface PermissionsServer<
 }
 
 // ---------------------------------------------------------------------------
-// Session access — share a session with specific users or the whole tenant
+// Session access — share a session with specific users
 // ---------------------------------------------------------------------------
 
-export type SessionAccessSubjectType = 'user' | 'tenant';
+export type SessionAccessSubjectType = 'user';
 
 export interface SessionAccessSubject {
   subjectType: SessionAccessSubjectType;
@@ -1170,7 +1172,7 @@ export interface SessionAccessSubject {
 }
 
 export interface SessionAccessGrant extends SessionAccessSubject {
-  /** Null for `tenant` grants and users the directory can no longer resolve. */
+  /** Null when the directory can no longer resolve the user. */
   displayName: string | null;
   email: string | null;
   createdAt: string;

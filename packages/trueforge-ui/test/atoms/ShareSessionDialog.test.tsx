@@ -66,12 +66,16 @@ function renderDialog({
     ...grants,
     ...req.subjects.map((subject): SessionAccessGrant => ({
       ...subject,
-      displayName: subject.subjectType === 'user' ? 'Bob' : null,
+      displayName: 'Bob',
       email: null,
       createdAt: '2026-01-02T00:00:00Z',
     })),
   ]);
   const revokeAccess = vi.fn(async () => undefined);
+  const updateSession = vi.fn(async (req: { sessionId: string; shared?: boolean }) => ({
+    ...session,
+    shared: req.shared === true,
+  }));
   const searchUsers = vi.fn(async () => ({
     data: [
       { id: 'u1', displayName: 'Alice', email: 'alice@example.com' },
@@ -81,6 +85,7 @@ function renderDialog({
   const server = createMockAgentUIServer({
     getSession: vi.fn(async () => session),
     getMe: vi.fn(async () => ({ tenantId: 'acme' })),
+    updateSession,
     sessionAccess: { listAccess, grantAccess, revokeAccess, searchUsers },
   });
   render(
@@ -94,7 +99,7 @@ function renderDialog({
       </ToasterProvider>
     </SlotsProvider>,
   );
-  return { listAccess, grantAccess, revokeAccess, searchUsers };
+  return { listAccess, grantAccess, revokeAccess, searchUsers, updateSession };
 }
 
 async function openSharePopover() {
@@ -116,7 +121,6 @@ describe('ShareSessionDialog', () => {
   it('loads tenant sharing and copies the share URL', async () => {
     renderDialog({
       session: { ...baseSession, shared: true },
-      grants: [{ ...aliceGrant, subjectType: 'tenant', subjectId: 'acme', displayName: null, email: null }],
     });
     await openSharePopover();
 
@@ -132,18 +136,15 @@ describe('ShareSessionDialog', () => {
     expect(await screen.findByText('Link copied to your clipboard')).toBeInTheDocument();
   });
 
-  it('grants and revokes the tenant subject when switching access', async () => {
-    const { grantAccess, revokeAccess } = renderDialog();
+  it('updates session.shared when switching access', async () => {
+    const { updateSession } = renderDialog();
     await openSharePopover();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Session sharing' }));
     fireEvent.click(await screen.findByRole('option', { name: 'Everyone within acme' }));
 
     await waitFor(() => {
-      expect(grantAccess).toHaveBeenCalledWith({
-        sessionId: 'session-1',
-        subjects: [{ subjectType: 'tenant', subjectId: 'acme' }],
-      });
+      expect(updateSession).toHaveBeenCalledWith({ sessionId: 'session-1', shared: true });
     });
     expect(screen.getByLabelText('Share URL')).toBeInTheDocument();
 
@@ -151,13 +152,13 @@ describe('ShareSessionDialog', () => {
     fireEvent.click(await screen.findByRole('option', { name: 'Only you' }));
 
     await waitFor(() => {
-      expect(revokeAccess).toHaveBeenCalledWith({ sessionId: 'session-1', subjectType: 'tenant', subjectId: 'acme' });
+      expect(updateSession).toHaveBeenCalledWith({ sessionId: 'session-1', shared: false });
     });
     expect(screen.queryByLabelText('Share URL')).not.toBeInTheDocument();
   });
 
   it('closes permission options on outside click without changing access', async () => {
-    const { grantAccess, revokeAccess } = renderDialog();
+    const { updateSession } = renderDialog();
     await openSharePopover();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Session sharing' }));
@@ -166,20 +167,18 @@ describe('ShareSessionDialog', () => {
     fireEvent.mouseDown(screen.getByText('Change permissions'));
 
     expect(screen.queryByRole('option', { name: 'Everyone within acme' })).not.toBeInTheDocument();
-    expect(grantAccess).not.toHaveBeenCalled();
-    expect(revokeAccess).not.toHaveBeenCalled();
+    expect(updateSession).not.toHaveBeenCalled();
   });
 
   it('closes the permission menu without changing access when the current option is clicked', async () => {
-    const { grantAccess, revokeAccess } = renderDialog();
+    const { updateSession } = renderDialog();
     await openSharePopover();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Session sharing' }));
     fireEvent.click(await screen.findByRole('option', { name: 'Only you' }));
 
     expect(screen.queryByRole('option', { name: 'Only you' })).not.toBeInTheDocument();
-    expect(grantAccess).not.toHaveBeenCalled();
-    expect(revokeAccess).not.toHaveBeenCalled();
+    expect(updateSession).not.toHaveBeenCalled();
   });
 
   it('lists the owner and collaborators and shows the share URL once someone is invited', async () => {

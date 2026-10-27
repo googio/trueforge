@@ -15,7 +15,7 @@ export type SessionSharePermission = 'private' | 'tenant';
 export function useShareSessionDialog(sessionId: string | null | undefined): {
   permission: SessionSharePermission;
   canManage: boolean;
-  /** Sharing writes need the access port and the caller's tenant id. */
+  /** Tenant-wide sharing is a session `shared` write; needs MANAGE only. */
   canChangePermission: boolean;
   canInvite: boolean;
   loading: boolean;
@@ -46,7 +46,7 @@ export function useShareSessionDialog(sessionId: string | null | undefined): {
 
   const hasSession = sessionId != null && sessionId.length > 0;
   const shareUrl = hasSession ? buildSharedSessionHref({ sessionId, routes }) : '';
-  const canChangePermission = canManage && sessionAccess != null && tenantId != null;
+  const canChangePermission = canManage;
   const canInvite = canManage && sessionAccess != null;
 
   const load = useCallback(async () => {
@@ -68,7 +68,6 @@ export function useShareSessionDialog(sessionId: string | null | undefined): {
       if (sessionAccess != null && canManage) {
         const grants = await sessionAccess.listAccess({ sessionId });
         setCollaborators(grants.filter(grant => grant.subjectType === 'user'));
-        setPermission(grants.some(grant => grant.subjectType === 'tenant') ? 'tenant' : 'private');
       }
     } catch (caught) {
       toaster?.showError(caught);
@@ -79,21 +78,19 @@ export function useShareSessionDialog(sessionId: string | null | undefined): {
 
   const changePermission = useCallback(
     async (next: SessionSharePermission) => {
-      if (!canChangePermission || next === permission || !hasSession || sessionAccess == null || tenantId == null) {
+      if (!canChangePermission || next === permission || !hasSession || server == null) {
         return;
       }
       const previous = permission;
       setPermission(next);
       try {
-        const subject = { subjectType: 'tenant', subjectId: tenantId } as const;
-        if (next === 'tenant') await sessionAccess.grantAccess({ sessionId, subjects: [subject] });
-        else await sessionAccess.revokeAccess({ sessionId, ...subject });
+        await server.updateSession({ sessionId, shared: next === 'tenant' });
       } catch (caught) {
         setPermission(previous);
         toaster?.showError(caught);
       }
     },
-    [canChangePermission, hasSession, permission, sessionAccess, sessionId, tenantId, toaster],
+    [canChangePermission, hasSession, permission, server, sessionId, toaster],
   );
 
   const invite = useCallback(

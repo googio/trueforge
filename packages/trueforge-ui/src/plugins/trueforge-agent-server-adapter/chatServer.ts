@@ -241,11 +241,12 @@ export function createHarnessChatServer(
       await client.sessions.update(sessionId, { title });
     },
 
-    async updateSession({ sessionId, agentSpec, title }) {
+    async updateSession({ sessionId, agentSpec, title, shared }) {
       // Named (reference) sessions reject agent updates server-side.
       const body: TrueForgeApi.UpdateSessionRequest = {
         ...(agentSpec === undefined ? {} : { agent: { spec: toHarnessAgentSpec(agentSpec) } }),
         ...(title === undefined ? {} : { title }),
+        ...(shared === undefined ? {} : { shared }),
       };
       const response = await client.sessions.update(sessionId, body);
       return toUiSession(response.data);

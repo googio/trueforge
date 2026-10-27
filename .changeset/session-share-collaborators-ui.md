@@ -3,4 +3,4 @@
 '@truefoundry/trueforge-assistant-ui-runtime': patch
 ---
 
-Share sessions with specific users: invite by search, list and remove collaborators, and manage "everyone" sharing through the session access port.
+Share sessions with specific users via the session access port (invite, list, remove), and toggle tenant-wide access with the existing session `shared` flag on updateSession.
