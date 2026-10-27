@@ -87,6 +87,7 @@ export const queryKeys = {
   schedules: {
     all: () => [ROOT, 'schedules'] as const,
     list: (params: ListSchedulesParams) => [ROOT, 'schedules', 'list', params] as const,
+    detail: (scheduleId: string) => [ROOT, 'schedules', 'detail', scheduleId] as const,
     runs: (scheduleId: string) => [ROOT, 'schedules', 'runs', scheduleId] as const,
     forAgents: (agentIds: readonly string[]) => [ROOT, 'schedules', 'for-agents', agentIds] as const,
   },

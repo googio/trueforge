@@ -1074,6 +1074,8 @@ function buildTurnUpdateFromFold(
   // already ended (cancelled/error) so they do not stay stuck as "running".
   // Restore afterward so the flag does not leak into the next turn.
   const previousParentTerminal = foldState.parentTerminalStatus;
+  const previousSettledCompletedAt = foldState.settledTurnCompletedAtMs;
+  foldState.settledTurnCompletedAtMs = turn.state.status === 'running' ? undefined : Date.parse(turn.state.completedAt);
   if (turn.state.status === 'cancelled') {
     foldState.parentTerminalStatus = 'cancelled';
   } else if (turn.state.status === 'error') {
@@ -1089,6 +1091,7 @@ function buildTurnUpdateFromFold(
     return update;
   } finally {
     foldState.parentTerminalStatus = previousParentTerminal;
+    foldState.settledTurnCompletedAtMs = previousSettledCompletedAt;
   }
 }
 
