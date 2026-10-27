@@ -231,7 +231,6 @@ export class InMemorySessionStore<
       agent: deepCopy(input.agent),
       title: null,
       shared: false,
-      last_turn_id: null,
       last_turn_details: null,
       external_id: externalId,
       source: input.source !== null ? deepCopy(input.source) : null,
@@ -449,7 +448,6 @@ export class InMemorySessionStore<
     this.turns.set(tKey, turnRecord);
     this.events.set(tKey, []);
     stored.turnIds.push(input.turn.turn_id);
-    stored.record.last_turn_id = input.turn.turn_id;
     stored.record.last_turn_details = SessionLastTurnDetailsSchema.parse({
       id: input.turn.turn_id,
       state: input.turn.state,
@@ -916,8 +914,8 @@ export class InMemorySessionStore<
     }
 
     const decodedCursor = input.page_token === undefined ? undefined : decodeSessionEventPageToken(input.page_token);
-    const lastTurnId = decodedCursor?.last_turn_id ?? input.last_turn_id ?? stored.record.last_turn_id;
-    if (lastTurnId === null) {
+    const lastTurnId = decodedCursor?.last_turn_id ?? input.last_turn_id ?? stored.record.last_turn_details?.id;
+    if (lastTurnId === undefined) {
       return { data: [], pagination: { limit: input.limit } };
     }
     const cursor: SessionEventPageCursor = {
