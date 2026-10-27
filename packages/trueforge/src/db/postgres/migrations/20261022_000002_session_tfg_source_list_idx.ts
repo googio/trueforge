@@ -2,8 +2,8 @@ import { sql, type Kysely } from 'kysely';
 import { SESSION_TFG_SOURCE_LIST_IDX } from '../../indexes';
 
 /**
- * A caller's sessions in keyset order, so their newest-first listing needs no sort with or without
- * a `tfg.source` filter; the filter is checked on index entries without visiting the table.
+ * Equality columns first, then the keyset sort columns, so listing a caller's sessions for one
+ * `tfg.source` value (or a missing key) reads them in order without a sort.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`SET LOCAL lock_timeout = '5s'`.execute(db);
@@ -12,9 +12,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       ON session (
         tenant_id,
         (created_by_subject->>'subject_id'),
+        (metadata->>'tfg.source'),
         updated_at,
-        session_id,
-        (metadata->>'tfg.source')
+        session_id
       )
   `.execute(db);
 }

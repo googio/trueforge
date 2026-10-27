@@ -17,8 +17,8 @@ export const AGENT_EXTERNAL_ID_UQ = 'agent_external_id_uq';
 export const SESSION_METADATA_GIN = 'session_metadata_gin';
 
 /**
- * `(tenant_id, created_by_subject.subject_id, updated_at, session_id, metadata.tfg.source)` on
- * session — a caller's sessions in keyset order, optionally filtered by `tfg.source`.
+ * `(tenant_id, created_by_subject.subject_id, metadata.tfg.source, updated_at, session_id)` on
+ * session — a caller's sessions for one `tfg.source` value (or none) in keyset order.
  */
 export const SESSION_TFG_SOURCE_LIST_IDX = 'session_tfg_source_list_idx';
 
