@@ -38,6 +38,8 @@ export interface ModelSelectorEntry<
   id: string;
   provider: TProvider;
   properties: TProperties;
+  /** Backend notice when reasoning effort or context length is not configured. */
+  warning?: string;
 }
 
 /** Skill selector row. Host extends for fqn, preload, etc. */
@@ -1209,7 +1211,7 @@ export interface SandboxEnvironmentServer<TEnvironment extends SandboxEnvironmen
 // Permissions — optional resource mutation grants
 // ---------------------------------------------------------------------------
 
-export type PermissionResourceType = 'agent' | 'schedule' | 'session' | 'tenant';
+export type PermissionResourceType = 'agent' | 'schedule' | 'session' | 'tenant' | 'sandbox_environment';
 
 export type ResourcePermission = 'USE' | 'MANAGE' | 'DELETE' | 'CREATE';
 

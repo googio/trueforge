@@ -609,6 +609,17 @@ export class TurnHandle<TTransaction = never, TTurnCustom extends object = Recor
         return;
       }
 
+      case HarnessEventType.THREAD_CONTEXT_COMPACTION_STARTED:
+      case HarnessEventType.THREAD_CONTEXT_COMPACTION_FINISHED: {
+        await this.writeStore('append', () =>
+          this.store.appendToEvents({
+            ...scope,
+            events: [event],
+          }),
+        );
+        return event;
+      }
+
       case InternalEventType.AGENT_CONTEXT_APPEND: {
         const userEvents = [...event.output, ...event.applied_user_events];
         await this.writeStore('append', () =>

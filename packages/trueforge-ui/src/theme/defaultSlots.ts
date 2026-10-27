@@ -3,6 +3,7 @@ import { Accordion, AccordionDetails, AccordionSummary } from '../atoms/primitiv
 
 import { AgentStepsCard } from '../atoms/adapters/AgentStepsCardAdapter.js';
 import { AskUserPrompt } from '../atoms/adapters/AskUserPromptAdapter.js';
+import { ContextCompactionCard } from '../atoms/adapters/ContextCompactionCardAdapter.js';
 import { McpAuthPrompt } from '../atoms/adapters/McpAuthPromptAdapter.js';
 import { ReasoningCard } from '../atoms/adapters/ReasoningCardAdapter.js';
 
@@ -218,6 +219,7 @@ export const defaultSlots = {
   SandboxToolCallCard,
   AgentStepsCard,
   ReasoningCard,
+  ContextCompactionCard,
   AskUserPrompt,
   McpAuthPrompt,
   AttachmentCard,
