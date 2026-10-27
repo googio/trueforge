@@ -46,7 +46,10 @@ function runtimeServer({
   return {
     ...server,
     async createSession(request) {
-      const session = await server.createSession(request);
+      const session = await server.createSession({
+        ...request,
+        metadata: { ...request.metadata, ...UI_SESSION_SOURCE_METADATA },
+      });
       locallyCreatedSessionIds.add(session.id);
       return session;
     },

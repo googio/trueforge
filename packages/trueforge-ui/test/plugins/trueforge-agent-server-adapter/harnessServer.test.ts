@@ -279,10 +279,10 @@ describe('createHarnessChatServer', () => {
     };
 
     const server = createHarnessChatServer({ fetch: fetchNamed });
-    await server.listSessions({ metadata: { source: 'ui' } });
+    await server.listSessions({ metadata: { 'tfg.source': 'ui' } });
 
     assert.ok(listUrl !== undefined);
-    assert.equal(new URL(listUrl, 'http://test.local').searchParams.get('metadata[source]'), 'ui');
+    assert.equal(new URL(listUrl, 'http://test.local').searchParams.get('metadata[tfg.source]'), 'ui');
   });
 
   it('PATCHes session title and returns the updated UI session', async () => {
