@@ -20,7 +20,7 @@ import {
 } from '../db/mcpServerStore';
 import type { TurnMetadata } from '../db/turnMetadata';
 import type { OAuthClientRecord } from '../mcp/auth/types';
-import { resolveMcpAuthStatus, type McpAuthStatus } from '../schemas/mcpServer';
+import { resolveMcpAuthStatus, withoutAuthorizationHeader, type McpAuthStatus } from '../schemas/mcpServer';
 import {
   accessTokenForRequest,
   asTrueFoundryRequestContext,
@@ -51,13 +51,6 @@ export type TrueFoundryMcpApiClient = Pick<
   | 'vendToken'
   | 'getTenantControlPlaneUrl'
 >;
-
-function withoutAuthorization(headers: Record<string, string> | undefined): Record<string, string> {
-  if (headers === undefined) {
-    return {};
-  }
-  return Object.fromEntries(Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'authorization'));
-}
 
 /**
  * Absolute FE landing for the upstream authorize `redirectURL`.
@@ -113,9 +106,11 @@ export class TrueFoundryMcpServerStore<TTransaction = never> implements IMcpServ
   resolveInvokeHeaders(input: {
     record: McpServerRecord;
     userRef: string;
+    userCredential?: string | null;
     turnMetadata?: TurnMetadata;
   }): RemoteMcpHeaders {
     const { record, userRef, turnMetadata } = input;
+    void input.userCredential;
     return async () => {
       const status = await this.authorize({
         tenant_id: record.tenant_id,
@@ -137,7 +132,7 @@ export class TrueFoundryMcpServerStore<TTransaction = never> implements IMcpServ
       }
       const authorization = await this.#resolveGatewayAuthorization();
       const invokeHeaders = {
-        ...withoutAuthorization(this.#perServerHeaders[record.name]),
+        ...withoutAuthorizationHeader(this.#perServerHeaders[record.name]),
         ...gatewayHeaders(authorization),
         ...gatewayMetadataHeadersForTurn(turnMetadata),
       };

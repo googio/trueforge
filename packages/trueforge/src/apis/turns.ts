@@ -156,6 +156,8 @@ interface BeginTurnExecutionParams {
   input: TurnInputItem[] | undefined;
   previous_turn_id: string | undefined;
   userRef: string;
+  /** Caller bearer for MCP `passthrough` auth. Null/absent for schedule runs. */
+  userCredential?: string | null;
   /** Raw inbound request headers. Absent for a schedule run. */
   requestHeaders?: Record<string, string>;
   deps: BeginTurnExecutionDeps;
@@ -176,6 +178,7 @@ function createTurnResolver(deps: {
   logger: Logger;
   signal: AbortSignal;
   userRef: string;
+  userCredential?: string | null;
   session: SessionHandle;
   turnMetadata: TurnMetadata;
 }): TurnResourceResolver {
@@ -190,6 +193,7 @@ function createTurnResolver(deps: {
     logger,
     signal,
     userRef,
+    userCredential,
     session,
     turnMetadata,
   } = deps;
@@ -221,6 +225,7 @@ function createTurnResolver(deps: {
         name,
         store: mcpServerStore,
         userRef,
+        ...(userCredential === undefined ? {} : { userCredential }),
         turnMetadata,
       });
       if (connection === undefined) {
@@ -453,7 +458,7 @@ export interface TurnEventDrainInput {
 export async function beginTurnExecution(
   params: BeginTurnExecutionParams,
 ): Promise<{ turn: TurnHandle; drainInput: TurnEventDrainInput }> {
-  const { session, input, previous_turn_id: previousTurnId, userRef, requestHeaders, deps } = params;
+  const { session, input, previous_turn_id: previousTurnId, userRef, userCredential, requestHeaders, deps } = params;
   // Fail closed on a bad inbound header before minting a turn id / starting execution.
   assertGatewayMetadataRequestHeaders(requestHeaders);
   const sessionId = session.session_id;
@@ -483,6 +488,7 @@ export async function beginTurnExecution(
     logger: deps.logger,
     signal: abortController.signal,
     userRef,
+    ...(userCredential === undefined ? {} : { userCredential }),
     session,
     turnMetadata: {
       sessionId: session.session_id,
@@ -851,6 +857,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       input: body.input,
       previous_turn_id: body.previous_turn_id,
       userRef: requestContext.subject.id,
+      userCredential: requestContext.user_credential,
       requestHeaders: c.req.header(),
       deps: {
         ...deps,

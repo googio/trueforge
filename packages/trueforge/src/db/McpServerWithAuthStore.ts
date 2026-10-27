@@ -1,7 +1,13 @@
 import type { RemoteMcpHeaders } from '@truefoundry/trueforge-core/core';
 import { isMcpAuthRequired, resolveMcpAuth } from '../mcp/auth/mcpDcr';
 import type { IOAuthTokenStore, OAuthClientRecord } from '../mcp/auth/types';
-import { resolveConfiguredMcpRequestHeaders, resolveMcpAuthStatus, type McpAuthStatus } from '../schemas/mcpServer';
+import {
+  resolveConfiguredMcpRequestHeaders,
+  resolveMcpAuthStatus,
+  resolvePassthroughMcpRequestHeaders,
+  withMcpAdditionalHeaders,
+  type McpAuthStatus,
+} from '../schemas/mcpServer';
 import {
   McpServerNotFoundError,
   type AuthorizeMcpServerInput,
@@ -60,9 +66,10 @@ export class McpServerWithAuthStore<TTransaction = never> implements IMcpServerW
   resolveInvokeHeaders(input: {
     record: McpServerRecord;
     userRef: string;
+    userCredential?: string | null;
     turnMetadata?: TurnMetadata;
   }): RemoteMcpHeaders {
-    const { record, userRef } = input;
+    const { record, userRef, userCredential } = input;
     if (record.manifest.auth?.type === 'dcr') {
       return async () => {
         const result = await resolveMcpAuth({
@@ -82,8 +89,19 @@ export class McpServerWithAuthStore<TTransaction = never> implements IMcpServerW
             },
           };
         }
-        return { headers: result.headers };
+        return {
+          headers: withMcpAdditionalHeaders({
+            manifest: record.manifest,
+            authHeaders: result.headers,
+          }),
+        };
       };
+    }
+    if (record.manifest.auth?.type === 'passthrough') {
+      return resolvePassthroughMcpRequestHeaders({
+        manifest: record.manifest,
+        userCredential,
+      });
     }
     return resolveConfiguredMcpRequestHeaders(record.manifest);
   }

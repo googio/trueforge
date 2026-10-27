@@ -572,7 +572,7 @@ export interface ToolBase {
 }
 
 /** Strict auth type id. Hosts widen branches via intersection + re-union. */
-export type ConnectorAuthType = 'dcr' | 'header' | 'none';
+export type ConnectorAuthType = 'dcr' | 'header' | 'passthrough' | 'none';
 
 // Write (create/update) — export branches so hosts can intersect extras
 export interface ConnectorAuthOAuth {
@@ -584,10 +584,13 @@ export interface ConnectorAuthApiKey {
   apiKey?: string;
   headerName?: string;
 }
+export interface ConnectorAuthPassthrough {
+  type: 'passthrough';
+}
 export interface ConnectorAuthNone {
   type: 'none';
 }
-export type ConnectorAuth = ConnectorAuthOAuth | ConnectorAuthApiKey | ConnectorAuthNone;
+export type ConnectorAuth = ConnectorAuthOAuth | ConnectorAuthApiKey | ConnectorAuthPassthrough | ConnectorAuthNone;
 
 // Public (list/detail) — no secrets
 export interface ConnectorAuthPublicOAuth {
@@ -598,10 +601,14 @@ export interface ConnectorAuthPublicApiKey {
   type: 'header';
   headerName?: string;
 }
+export interface ConnectorAuthPublicPassthrough {
+  type: 'passthrough';
+}
 export interface ConnectorAuthPublicNone {
   type: 'none';
 }
-export type ConnectorAuthPublic = ConnectorAuthPublicOAuth | ConnectorAuthPublicApiKey | ConnectorAuthPublicNone;
+export type ConnectorAuthPublic =
+  ConnectorAuthPublicOAuth | ConnectorAuthPublicApiKey | ConnectorAuthPublicPassthrough | ConnectorAuthPublicNone;
 
 /**
  * MCP / connector create-edit config. Host extends for extra fields, etc.
@@ -611,6 +618,8 @@ export interface ConnectorConfigBase<TAuth extends ConnectorAuth = ConnectorAuth
   description: string;
   url: string;
   auth: TAuth;
+  /** Static extras on every MCP request; auth wins on key conflict. */
+  additionalHeaders?: Record<string, string>;
 }
 
 /**
@@ -624,6 +633,8 @@ export interface ConnectorBase<TAuth extends ConnectorAuthPublic = ConnectorAuth
   description: string;
   url: string;
   auth: TAuth;
+  /** Static extras on every MCP request; auth wins on key conflict. */
+  additionalHeaders?: Record<string, string>;
   /** When true, UI should not show Disconnect. */
   requiresAuth: boolean;
   authenticated: boolean;

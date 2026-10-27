@@ -42,6 +42,7 @@ export class InlineMcpServerStore<TTransaction = never> implements IMcpServerWit
   resolveInvokeHeaders(input: {
     record: McpServerRecord;
     userRef: string;
+    userCredential?: string | null;
     turnMetadata?: TurnMetadata;
   }): RemoteMcpHeaders {
     const manifest = this.#inline[input.record.name];

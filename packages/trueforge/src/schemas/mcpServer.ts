@@ -7,9 +7,12 @@
  * RemoteMcpServerManifest | TrueFoundryMcpServerManifest.
  *
  * Auth: `header` stores shared request headers on the row.
+ * `passthrough` forwards the caller's bearer.
+ * `additional_headers` are static extras beside `auth` (auth wins on key conflict).
  * Turn execution resolves DCR tokens via resolveMcpAuth.
  */
 import { z } from '@hono/zod-openapi';
+import { HTTPException } from 'hono/http-exception';
 import type { OAuthToken } from '../mcp/auth/types';
 import { NameSchema } from './common';
 
@@ -45,8 +48,17 @@ const McpServerDcrAuthSchema = z
   .strict()
   .openapi('MCPServerDcrAuth');
 
+const McpServerPassthroughAuthSchema = z
+  .object({
+    type: z
+      .literal('passthrough')
+      .describe("Forward the caller's bearer token as Authorization on requests to this MCP server."),
+  })
+  .strict()
+  .openapi('MCPServerPassthroughAuth');
+
 export const McpServerManifestAuthSchema = z
-  .discriminatedUnion('type', [McpServerHeaderAuthSchema, McpServerDcrAuthSchema])
+  .discriminatedUnion('type', [McpServerHeaderAuthSchema, McpServerDcrAuthSchema, McpServerPassthroughAuthSchema])
   .describe('Optional auth settings. Omit when the server needs no credentials.')
   .openapi('MCPServerManifestAuth');
 
@@ -56,6 +68,14 @@ export const McpServerDescriptionSchema = z
   .min(1)
   .describe('Concise summary of what this MCP server provides.');
 
+/** Static extras on every request; when a key also appears under `auth`, auth wins. */
+export const McpServerAdditionalHeadersSchema = z
+  .record(z.string().min(1), z.string().min(1))
+  .describe(
+    'Additional HTTP headers sent on each request to the MCP server. If the same header is set in both additional_headers and auth, the auth value wins.',
+  )
+  .openapi('MCPServerAdditionalHeaders');
+
 /** User-configured remote MCP endpoint. */
 const RemoteMcpServerManifestSchema = z
   .object({
@@ -64,6 +84,7 @@ const RemoteMcpServerManifestSchema = z
     url: z.url().describe('MCP endpoint URL.'),
     description: McpServerDescriptionSchema,
     auth: McpServerManifestAuthSchema.optional(),
+    additional_headers: McpServerAdditionalHeadersSchema.optional(),
   })
   .strict()
   .openapi('RemoteMCPServerManifest');
@@ -76,6 +97,7 @@ const TrueFoundryMcpServerManifestSchema = z
     url: z.url().describe('Resolved AI Gateway proxy URL for this TrueFoundry-managed MCP server.'),
     description: McpServerDescriptionSchema,
     auth: McpServerManifestAuthSchema.optional(),
+    additional_headers: McpServerAdditionalHeadersSchema.optional(),
   })
   .strict()
   .openapi('TrueFoundryMCPServerManifest');
@@ -136,6 +158,7 @@ export const McpServerAuthPublicSchema = z
   .discriminatedUnion('type', [
     z.object({ type: z.literal('dcr') }).strict(),
     z.object({ type: z.literal('header') }).strict(),
+    z.object({ type: z.literal('passthrough') }).strict(),
   ])
   .describe('Auth mechanism when configured (no secrets). Omit when the server needs no credentials.')
   .openapi('MCPServerAuthPublic');
@@ -173,16 +196,61 @@ export type CreateMcpServerRequest = z.infer<typeof CreateMcpServerRequestSchema
 export type UpdateMcpServerRequest = z.infer<typeof UpdateMcpServerRequestSchema>;
 export type AvailableMcpServer = z.infer<typeof AvailableMcpServerSchema>;
 
+/** Drop Authorization so a static map cannot override a caller/gateway Bearer. */
+export function withoutAuthorizationHeader(headers: Record<string, string> | undefined): Record<string, string> {
+  if (headers === undefined) {
+    return {};
+  }
+  return Object.fromEntries(Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'authorization'));
+}
+
+/** Merge `additional_headers` under auth-derived headers (auth wins on conflict). */
+export function withMcpAdditionalHeaders(input: {
+  manifest: McpServerManifest;
+  authHeaders: Record<string, string>;
+}): Record<string, string> {
+  return {
+    ...(input.manifest.additional_headers ?? {}),
+    ...input.authHeaders,
+  };
+}
+
 /**
  * Headers for live MCP calls against a configured server.
- * Only `auth.type === 'header'` contributes. Turn execution uses DCR via
- * resolveMcpAuth instead of this helper.
+ * `auth.type === 'header'` (plus `additional_headers`), or `additional_headers` alone.
+ * Turn execution uses DCR via resolveMcpAuth and passthrough via
+ * {@link resolvePassthroughMcpRequestHeaders}.
  */
 export function resolveConfiguredMcpRequestHeaders(manifest: McpServerManifest): Record<string, string> {
   if (manifest.auth?.type === 'header') {
-    return { ...manifest.auth.headers };
+    return withMcpAdditionalHeaders({ manifest, authHeaders: { ...manifest.auth.headers } });
+  }
+  if (manifest.auth === undefined) {
+    return { ...(manifest.additional_headers ?? {}) };
   }
   return {};
+}
+
+/**
+ * Caller bearer plus `additional_headers` for `auth.type === 'passthrough'`.
+ * Fails closed when the request has no credential (e.g. schedule runs).
+ */
+export function resolvePassthroughMcpRequestHeaders(input: {
+  manifest: McpServerManifest;
+  userCredential: string | null | undefined;
+}): Record<string, string> {
+  if (input.manifest.auth?.type !== 'passthrough') {
+    return {};
+  }
+  if (input.userCredential === null || input.userCredential === undefined || input.userCredential.length === 0) {
+    throw new HTTPException(422, {
+      message: `MCP server "${input.manifest.name}" uses passthrough auth but the request has no caller credential`,
+    });
+  }
+  return withMcpAdditionalHeaders({
+    manifest: input.manifest,
+    authHeaders: { Authorization: `Bearer ${input.userCredential}` },
+  });
 }
 
 export function resolveMcpAuthStatus({
@@ -199,7 +267,7 @@ export function resolveMcpAuthStatus({
   if (manifest.auth?.type === 'dcr') {
     return token ? { status: 'authenticated' } : { status: 'auth_required' };
   }
-  if (manifest.auth?.type === 'header') {
+  if (manifest.auth?.type === 'header' || manifest.auth?.type === 'passthrough') {
     return { status: 'authenticated' };
   }
   return { status: 'not_required' };

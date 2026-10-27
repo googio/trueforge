@@ -3,6 +3,7 @@
 import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
+import { McpServerAdditionalHeaders } from "./McpServerAdditionalHeaders.js";
 import { McpServerManifestAuth } from "./McpServerManifestAuth.js";
 import { ResourceName } from "./ResourceName.js";
 
@@ -10,6 +11,7 @@ export const RemoteMcpServerManifest: core.serialization.ObjectSchema<
     serializers.RemoteMcpServerManifest.Raw,
     TrueForge.RemoteMcpServerManifest
 > = core.serialization.object({
+    additionalHeaders: core.serialization.property("additional_headers", McpServerAdditionalHeaders.optional()),
     auth: McpServerManifestAuth.optional(),
     description: core.serialization.string(),
     name: ResourceName,
@@ -19,6 +21,7 @@ export const RemoteMcpServerManifest: core.serialization.ObjectSchema<
 
 export declare namespace RemoteMcpServerManifest {
     export interface Raw {
+        additional_headers?: McpServerAdditionalHeaders.Raw | null;
         auth?: McpServerManifestAuth.Raw | null;
         description: string;
         name: ResourceName.Raw;

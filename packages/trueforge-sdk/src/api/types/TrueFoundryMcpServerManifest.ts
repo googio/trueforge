@@ -3,6 +3,8 @@
 import type * as TrueForge from "../index.js";
 
 export interface TrueFoundryMcpServerManifest {
+    /** Additional HTTP headers sent on each request to the MCP server. If the same header is set in both additional_headers and auth, the auth value wins. */
+    additionalHeaders?: TrueForge.McpServerAdditionalHeaders;
     auth?: TrueForge.McpServerManifestAuth;
     /** Concise summary of what this MCP server provides. */
     description: string;

@@ -116,12 +116,15 @@ export async function getMcpConnection({
   name,
   store,
   userRef,
+  userCredential,
   turnMetadata,
 }: {
   tenant_id: string;
   name: string;
   store: IMcpServerWithAuthStore;
   userRef: string;
+  /** Caller bearer for `auth.type === 'passthrough'`. */
+  userCredential?: string | null;
   turnMetadata?: TurnMetadata;
 }): Promise<McpConnection | undefined> {
   const record = await store.getServer({ tenant_id, name });
@@ -134,6 +137,7 @@ export async function getMcpConnection({
     headers: store.resolveInvokeHeaders({
       record,
       userRef,
+      ...(userCredential === undefined ? {} : { userCredential }),
       ...(turnMetadata === undefined ? {} : { turnMetadata }),
     }),
   };

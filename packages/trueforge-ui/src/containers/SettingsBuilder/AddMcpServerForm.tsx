@@ -15,7 +15,10 @@ export type AddMcpServerDraft = {
   url: string;
   description: string;
   auth: ConnectorAuth;
+  additionalHeaders?: Record<string, string>;
 };
+
+type HeaderRow = { key: string; value: string };
 
 type AddMcpServerFormProps = {
   open: boolean;
@@ -30,6 +33,7 @@ const AUTH_OPTIONS: Array<{ value: McpAuthType; label: string }> = [
   { value: 'none', label: 'None' },
   { value: 'header', label: 'API Key' },
   { value: 'dcr', label: 'OAuth' },
+  { value: 'passthrough', label: 'Passthrough' },
 ];
 
 const inputClassName = auiInputClass('h-11 shadow-sm');
@@ -40,6 +44,25 @@ const RequiredMark = () => (
   </span>
 );
 
+function rowsFromHeaders(headers: Record<string, string> | undefined): HeaderRow[] {
+  if (headers === undefined) {
+    return [];
+  }
+  return Object.entries(headers).map(([key, value]) => ({ key, value }));
+}
+
+function headersFromRows(rows: HeaderRow[]): Record<string, string> | undefined {
+  const headers: Record<string, string> = {};
+  for (const row of rows) {
+    const key = row.key.trim();
+    if (key.length === 0) {
+      continue;
+    }
+    headers[key] = row.value;
+  }
+  return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
 const AddMcpServerForm = ({ open, onOpenChange, onSubmit, connector, busy = false, error }: AddMcpServerFormProps) => {
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
@@ -47,6 +70,7 @@ const AddMcpServerForm = ({ open, onOpenChange, onSubmit, connector, busy = fals
   const [authType, setAuthType] = useState<McpAuthType>('dcr');
   const [apiKey, setApiKey] = useState('');
   const [headerName, setHeaderName] = useState('');
+  const [additionalHeaderRows, setAdditionalHeaderRows] = useState<HeaderRow[]>([]);
   const isEditing = connector !== undefined;
   const nameInputClassName = auiInputClass(
     `h-11 shadow-sm ${isEditing ? 'cursor-not-allowed bg-secondary-bg/60 text-text-secondary opacity-40' : ''}`,
@@ -59,6 +83,7 @@ const AddMcpServerForm = ({ open, onOpenChange, onSubmit, connector, busy = fals
     setAuthType('dcr');
     setApiKey('');
     setHeaderName('');
+    setAdditionalHeaderRows([]);
   };
 
   useEffect(() => {
@@ -69,6 +94,7 @@ const AddMcpServerForm = ({ open, onOpenChange, onSubmit, connector, busy = fals
     setAuthType(connector?.auth.type ?? 'dcr');
     setApiKey('');
     setHeaderName(connector?.auth.type === 'header' ? (connector.auth.headerName ?? '') : '');
+    setAdditionalHeaderRows(rowsFromHeaders(connector?.additionalHeaders));
   }, [connector, open]);
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -91,6 +117,7 @@ const AddMcpServerForm = ({ open, onOpenChange, onSubmit, connector, busy = fals
             ...(headerName.trim() ? { headerName: headerName.trim() } : {}),
           }
         : { type: authType };
+    const additionalHeaders = headersFromRows(additionalHeaderRows);
 
     try {
       await onSubmit({
@@ -98,6 +125,7 @@ const AddMcpServerForm = ({ open, onOpenChange, onSubmit, connector, busy = fals
         url: url.trim(),
         description: description.trim(),
         auth,
+        ...(additionalHeaders === undefined ? {} : { additionalHeaders }),
       });
       resetForm();
       onOpenChange(false);
@@ -226,6 +254,16 @@ const AddMcpServerForm = ({ open, onOpenChange, onSubmit, connector, busy = fals
             </div>
           ) : null}
 
+          {authType === 'passthrough' ? (
+            <div className="flex gap-1.5 bg-secondary-bg/40 p-2 rounded-md">
+              <Icon name="info" className="size-3.5 mt-1 text-text-secondary" />
+              <div className="text-xs text-text-secondary leading-5.5">
+                Forward the signed-in user&apos;s auth token directly to this MCP server. Use only for servers you
+                trust. Scheduled runs with no caller token will fail.
+              </div>
+            </div>
+          ) : null}
+
           {authType === 'header' ? (
             <>
               <div>
@@ -271,6 +309,68 @@ const AddMcpServerForm = ({ open, onOpenChange, onSubmit, connector, busy = fals
               </div>
             </>
           ) : null}
+
+          <div>
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <label className="text-sm font-medium text-text-primary">
+                Additional headers <span className="font-normal text-text-secondary">(optional)</span>
+              </label>
+              <Button.Secondary
+                type="button"
+                size="small"
+                onClick={() => {
+                  setAdditionalHeaderRows(rows => [...rows, { key: '', value: '' }]);
+                }}
+              >
+                Add header
+              </Button.Secondary>
+            </div>
+            <p className="mb-2 text-xs text-text-secondary">
+              Sent on each request. If the same header is set in auth, the auth value wins.
+            </p>
+            {additionalHeaderRows.length > 0 ? (
+              <div className="space-y-2">
+                {additionalHeaderRows.map((row, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={row.key}
+                      onChange={event => {
+                        const key = event.target.value;
+                        setAdditionalHeaderRows(rows => rows.map((item, i) => (i === index ? { ...item, key } : item)));
+                      }}
+                      placeholder="Header name"
+                      className={inputClassName}
+                      aria-label={`Additional header ${index + 1} name`}
+                    />
+                    <input
+                      type="text"
+                      value={row.value}
+                      onChange={event => {
+                        const value = event.target.value;
+                        setAdditionalHeaderRows(rows =>
+                          rows.map((item, i) => (i === index ? { ...item, value } : item)),
+                        );
+                      }}
+                      placeholder="Value"
+                      className={inputClassName}
+                      aria-label={`Additional header ${index + 1} value`}
+                    />
+                    <Button.Secondary
+                      type="button"
+                      size="small"
+                      aria-label={`Remove additional header ${index + 1}`}
+                      onClick={() => {
+                        setAdditionalHeaderRows(rows => rows.filter((_, i) => i !== index));
+                      }}
+                    >
+                      <Icon name="trash" className="size-3.5" />
+                    </Button.Secondary>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <div className="mt-6 space-y-3">

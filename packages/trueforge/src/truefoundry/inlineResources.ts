@@ -58,6 +58,12 @@ export function parseInlineMcpServers(raw: string): InlineMcpServers {
       if (parsed.data.auth?.type === 'dcr') {
         return { ok: false, reason: 'cannot use dcr auth — it needs a registered client and a stored token' };
       }
+      if (parsed.data.auth?.type === 'passthrough') {
+        return {
+          ok: false,
+          reason: 'cannot use passthrough auth — configure the server in settings instead of x-tfg-mcp',
+        };
+      }
       return { ok: true, manifest: parsed.data };
     },
   });

@@ -71,24 +71,49 @@ function omitUndefinedEntries(obj: Record<string, unknown>): Record<string, unkn
   return out;
 }
 
-/** Settings wire view: redact header secrets; leave DCR / no-auth manifests unchanged. */
-function redactMcpServerManifest(manifest: McpServerManifest): McpServerManifest {
-  if (manifest.auth?.type !== 'header') {
-    return manifest;
+function redactHeaderMap(headers: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    out[name] = toRedactedSecretValue(value);
   }
+  return out;
+}
+
+function mergeHeaderMapForWrite(input: {
+  incoming: Record<string, string>;
+  existing: Record<string, string> | undefined;
+}): Record<string, string> {
   const headers: Record<string, string> = {};
-  for (const [name, value] of Object.entries(manifest.auth.headers)) {
-    headers[name] = toRedactedSecretValue(value);
+  for (const [name, value] of Object.entries(input.incoming)) {
+    headers[name] = resolveStoredSecretValue({
+      incoming: value,
+      existing: input.existing?.[name],
+    });
   }
-  return {
-    ...manifest,
-    auth: { type: 'header', headers },
-  };
+  return headers;
+}
+
+/** Settings wire view: redact header secrets on auth.header and additional_headers. */
+function redactMcpServerManifest(manifest: McpServerManifest): McpServerManifest {
+  let next = manifest;
+  if (manifest.auth?.type === 'header') {
+    next = {
+      ...next,
+      auth: { type: 'header', headers: redactHeaderMap(manifest.auth.headers) },
+    };
+  }
+  if (manifest.additional_headers !== undefined) {
+    next = {
+      ...next,
+      additional_headers: redactHeaderMap(manifest.additional_headers),
+    };
+  }
+  return next;
 }
 
 /**
- * Strict PUT merge for `auth.type === 'header'`: each header value is always required;
- * redacted values keep the stored secret for the same header name.
+ * Strict PUT merge for `auth.type === 'header'` and `additional_headers`: each header value is
+ * always required; redacted values keep the stored secret for the same header name.
  * @throws {MissingStoredSecretError} when keep is requested without a stored header value
  */
 function resolveMcpServerManifestForWrite({
@@ -98,21 +123,27 @@ function resolveMcpServerManifestForWrite({
   incoming: McpServerManifest;
   existing: McpServerManifest | undefined;
 }): McpServerManifest {
-  if (incoming.auth?.type !== 'header') {
-    return incoming;
+  let next = incoming;
+  if (incoming.auth?.type === 'header') {
+    const existingHeaders = existing?.auth?.type === 'header' ? existing.auth.headers : undefined;
+    next = {
+      ...next,
+      auth: {
+        type: 'header',
+        headers: mergeHeaderMapForWrite({ incoming: incoming.auth.headers, existing: existingHeaders }),
+      },
+    };
   }
-  const existingHeaders = existing?.auth?.type === 'header' ? existing.auth.headers : undefined;
-  const headers: Record<string, string> = {};
-  for (const [name, value] of Object.entries(incoming.auth.headers)) {
-    headers[name] = resolveStoredSecretValue({
-      incoming: value,
-      existing: existingHeaders?.[name],
-    });
+  if (incoming.additional_headers !== undefined) {
+    next = {
+      ...next,
+      additional_headers: mergeHeaderMapForWrite({
+        incoming: incoming.additional_headers,
+        existing: existing?.additional_headers,
+      }),
+    };
   }
-  return {
-    ...incoming,
-    auth: { type: 'header', headers },
-  };
+  return next;
 }
 
 async function toConfiguredMcpServer<TTransaction>(params: {
@@ -476,6 +507,7 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
       name,
       store: deps.resolveMcpServerStore(c),
       userRef,
+      userCredential: requestContext.user_credential,
     });
     if (connection === undefined) {
       return c.json({ error: { message: `MCP server not found: ${name}` } }, 404);

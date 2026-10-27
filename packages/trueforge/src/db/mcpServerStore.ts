@@ -127,6 +127,8 @@ export interface IMcpServerWithAuthStore<TTransaction = never> extends IMcpServe
   resolveInvokeHeaders(input: {
     record: McpServerRecord;
     userRef: string;
+    /** Caller bearer for `auth.type === 'passthrough'`; null/absent fails closed for those servers. */
+    userCredential?: string | null;
     turnMetadata?: TurnMetadata;
   }): RemoteMcpHeaders;
 }

@@ -2,5 +2,6 @@
 export const AUTH_TYPE_LABELS: Record<string, string> = {
   dcr: 'OAuth2',
   header: 'API Key',
+  passthrough: 'Token Passthrough',
   none: 'No Auth',
 };

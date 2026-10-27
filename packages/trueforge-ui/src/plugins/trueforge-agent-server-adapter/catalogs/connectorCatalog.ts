@@ -1,8 +1,8 @@
 /**
  * Maps trueforge-ui connector-settings calls onto Harness
  *
- * UI: `dcr` / `header` / `none`, connector `id`.
- * Harness: `dcr` / `header` / omitted auth, resource `name`.
+ * UI: `dcr` / `header` / `passthrough` / `none`, connector `id`.
+ * Harness: `dcr` / `header` / `passthrough` / omitted auth, resource `name`.
  */
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import type {
@@ -41,6 +41,9 @@ export function toUiAuthPublic(auth: TrueForgeApi.McpServerManifestAuth | undefi
   if (auth.type === 'dcr') {
     return { type: 'dcr' };
   }
+  if (auth.type === 'passthrough') {
+    return { type: 'passthrough' };
+  }
   const headerName = Object.keys(auth.headers)[0];
   return {
     type: 'header',
@@ -54,6 +57,9 @@ export function toHarnessAuth(auth: ConnectorAuth): TrueForgeApi.McpServerManife
   }
   if (auth.type === 'dcr') {
     return { type: 'dcr' };
+  }
+  if (auth.type === 'passthrough') {
+    return { type: 'passthrough' };
   }
   const apiKey = auth.apiKey?.trim();
   if (apiKey === undefined || apiKey === '') {
@@ -109,6 +115,9 @@ export function toUiConnector(server: TrueForgeApi.ConfiguredMcpServer): UiConne
     description: server.manifest.description,
     url: server.manifest.url,
     auth,
+    ...(server.manifest.additionalHeaders === undefined
+      ? {}
+      : { additionalHeaders: server.manifest.additionalHeaders }),
     requiresAuth: server.authStatus.status === 'auth_required',
     authenticated: server.authStatus.status !== 'auth_required',
   };
@@ -132,6 +141,7 @@ export function toHarnessManifest(req: {
   url: string;
   auth: ConnectorAuth;
   description?: string;
+  additionalHeaders?: Record<string, string>;
 }): TrueForgeApi.McpServerManifest {
   const auth = toHarnessAuth(req.auth);
   const trimmed = req.description?.trim();
@@ -141,6 +151,7 @@ export function toHarnessManifest(req: {
     url: req.url,
     description: trimmed !== undefined && trimmed !== '' ? trimmed : `${req.name} MCP server`,
     ...(auth === undefined ? {} : { auth }),
+    ...(req.additionalHeaders === undefined ? {} : { additionalHeaders: req.additionalHeaders }),
   };
 }
 
@@ -228,6 +239,7 @@ export function createConnectorCatalog(
           url: req.url,
           auth,
           description: req.description,
+          ...(req.additionalHeaders === undefined ? {} : { additionalHeaders: req.additionalHeaders }),
         }),
       });
       return toUiConnector(body.data);
@@ -240,6 +252,7 @@ export function createConnectorCatalog(
           url: req.url,
           auth,
           description: req.description,
+          ...(req.additionalHeaders === undefined ? {} : { additionalHeaders: req.additionalHeaders }),
         }),
       });
       return toUiConnector(body.data);

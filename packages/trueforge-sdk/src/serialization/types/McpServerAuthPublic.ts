@@ -4,13 +4,18 @@ import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 import { McpServerAuthPublicOne } from "./McpServerAuthPublicOne.js";
+import { McpServerAuthPublicTwo } from "./McpServerAuthPublicTwo.js";
 import { McpServerAuthPublicZero } from "./McpServerAuthPublicZero.js";
 
 export const McpServerAuthPublic: core.serialization.Schema<
     serializers.McpServerAuthPublic.Raw,
     TrueForge.McpServerAuthPublic
-> = core.serialization.undiscriminatedUnion([McpServerAuthPublicZero, McpServerAuthPublicOne]);
+> = core.serialization.undiscriminatedUnion([
+    McpServerAuthPublicZero,
+    McpServerAuthPublicOne,
+    McpServerAuthPublicTwo,
+]);
 
 export declare namespace McpServerAuthPublic {
-    export type Raw = McpServerAuthPublicZero.Raw | McpServerAuthPublicOne.Raw;
+    export type Raw = McpServerAuthPublicZero.Raw | McpServerAuthPublicOne.Raw | McpServerAuthPublicTwo.Raw;
 }
