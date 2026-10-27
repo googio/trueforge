@@ -141,6 +141,27 @@ describe('TrueFoundryMcpServerStore.resolveInvokeHeaders', () => {
     },
   );
 
+  it.each([
+    'x-tfy-actor-authorization',
+    'X-Tfy-Actor-Authorization',
+    'proxy-authorization',
+    'Proxy-Authorization',
+    'cookie',
+    'Cookie',
+  ])('drops an override under %s so callers cannot set hop/auth headers', async name => {
+    const headers = await invokeHeaders(
+      storeWith({
+        'tfy-platform-mcp': { [name]: 'smuggled', 'x-tfy-mcp-headers': '{"a":"b"}' },
+      }),
+      'tfy-platform-mcp',
+    );
+
+    expect(headers).toEqual({
+      Authorization: 'Bearer caller-token',
+      'x-tfy-mcp-headers': '{"a":"b"}',
+    });
+  });
+
   it('keeps the rest of an override that also carried an authorization key', async () => {
     const headers = await invokeHeaders(
       storeWith({

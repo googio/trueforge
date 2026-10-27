@@ -22,6 +22,7 @@ import type { TurnMetadata } from '../db/turnMetadata';
 import type { OAuthClientRecord } from '../mcp/auth/types';
 import { resolveMcpAuthStatus, type McpAuthStatus } from '../schemas/mcpServer';
 import {
+  ACTOR_AUTHORIZATION_HEADER,
   accessTokenForRequest,
   asTrueFoundryRequestContext,
   gatewayHeaders,
@@ -52,11 +53,21 @@ export type TrueFoundryMcpApiClient = Pick<
   | 'getTenantControlPlaneUrl'
 >;
 
-function withoutAuthorization(headers: Record<string, string> | undefined): Record<string, string> {
+/** Platform-owned hop/auth headers; callers must not set these via per-server overrides. */
+const STRIPPED_PER_SERVER_HEADERS = new Set([
+  'authorization',
+  ACTOR_AUTHORIZATION_HEADER,
+  'proxy-authorization',
+  'cookie',
+]);
+
+function withoutStrippedPerServerHeaders(headers: Record<string, string> | undefined): Record<string, string> {
   if (headers === undefined) {
     return {};
   }
-  return Object.fromEntries(Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'authorization'));
+  return Object.fromEntries(
+    Object.entries(headers).filter(([name]) => !STRIPPED_PER_SERVER_HEADERS.has(name.toLowerCase())),
+  );
 }
 
 /**
@@ -137,7 +148,7 @@ export class TrueFoundryMcpServerStore<TTransaction = never> implements IMcpServ
       }
       const authorization = await this.#resolveGatewayAuthorization();
       const invokeHeaders = {
-        ...withoutAuthorization(this.#perServerHeaders[record.name]),
+        ...withoutStrippedPerServerHeaders(this.#perServerHeaders[record.name]),
         ...gatewayHeaders(authorization),
         ...gatewayMetadataHeadersForTurn(turnMetadata),
       };
