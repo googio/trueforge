@@ -3,6 +3,7 @@ import type { Logger } from 'winston';
 import { describeContentSize, estimateTokensForString } from '../../llm/usage';
 import type { ToolCallResult } from '../../mcp/executeToolCalls';
 import { getOperationMetrics } from '../../observability/operationMetrics';
+import { GET_TOOL_INFO_NAME } from '../../runtime/DeferredTool';
 import type { HarnessSandbox, SandboxInfo } from '../../sandbox/Sandbox';
 import { createSandboxLargeToolResponseGuidance, SANDBOX_SCHEMA_INFER_TAG } from '../../sandbox/Sandbox';
 import { extractErrorLogFields } from '../../util/errorLogFields';
@@ -14,6 +15,10 @@ import { createDynamicSubAgentLargeToolResponseGuidance } from './DynamicSubAgen
 export const DEFAULT_INDIVIDUAL_TOOL_TOKEN_THRESHOLD = 6000;
 export const DEFAULT_TOTAL_TOOL_TOKEN_THRESHOLD = 10000;
 export const DEFAULT_PREVIEW_NUMBER_OF_CHARACTERS = 100;
+/** Per-tool character caps above the default individual offload threshold. */
+const ELEVATED_TOOL_CHARACTER_LIMITS: Readonly<Record<string, number>> = {
+  [GET_TOOL_INFO_NAME]: 50_000,
+};
 const FAILURE_MESSAGE_TRUNCATION_LENGTH = 500;
 
 type ResultCategory = 'failure' | 'sandbox' | 'mcp';
@@ -45,6 +50,15 @@ function createContentPreview(content: string, previewChars: number): string {
   return `${content.slice(0, previewChars)}\n...\n${content.slice(-previewChars)}`;
 }
 
+function isWithinElevatedCharacterLimit(entry: ToolResultWithInfo): boolean {
+  const toolName = entry.toolCallResult.info?.originalToolName;
+  if (toolName === undefined) {
+    return false;
+  }
+  const limit = ELEVATED_TOOL_CHARACTER_LIMITS[toolName];
+  return limit !== undefined && entry.originalContent.length <= limit;
+}
+
 export class LargeToolResponseProcessor implements ToolResponseProcessor {
   private dynamicSubAgentsPresent: boolean;
   private individualTokenThreshold: number;
@@ -72,13 +86,25 @@ export class LargeToolResponseProcessor implements ToolResponseProcessor {
   }
 
   // Thresholds are configured in tokens, estimated at 4 characters per token; state them in characters for the model.
+  private individualResponseCharacterLimit(): string {
+    return (this.individualTokenThreshold * 4).toLocaleString('en-US');
+  }
+
   // An entry at/above the individual threshold was blocked for its own size; below it, only the combined limit can block it.
   private blockReasonDescription(entry: ToolResultWithInfo): string {
-    const perResponse = (this.individualTokenThreshold * 4).toLocaleString('en-US');
+    const perResponse = this.individualResponseCharacterLimit();
     const combined = (this.totalTokenThreshold * 4).toLocaleString('en-US');
     return entry.originalTokens >= this.individualTokenThreshold
       ? `this exceeds the ${perResponse}-character tool call response limit`
       : `the parallel tool call responses together exceed the ${combined}-character combined tool call response limit`;
+  }
+
+  private formatBlockedContentPreamble(entry: ToolResultWithInfo): string {
+    return `Content too big (${describeContentSize(entry.originalContent)}; ${this.blockReasonDescription(entry)})`;
+  }
+
+  private formatPreview(preview: string): string {
+    return `Preview (first and last ${String(this.previewNumberOfCharacters)} chars):\n${preview}`;
   }
 
   private createLargeToolResponseGuidance(sandbox: HarnessSandbox | undefined, entry: ToolResultWithInfo): string {
@@ -92,17 +118,19 @@ export class LargeToolResponseProcessor implements ToolResponseProcessor {
       steps.push(createDynamicSubAgentLargeToolResponseGuidance());
     }
 
-    return `Content too big (${this.blockReasonDescription(entry)}). To handle a large tool call the Agent can do the following:\n${steps
+    return `${this.formatBlockedContentPreamble(entry)}. To handle a large tool call the Agent can do the following:\n${steps
       .map((step, index) => `${String(index + 1)}. ${step}`)
       .join('\n')}`;
   }
 
-  private createFileDumpMessage(params: { filePath: string; preview: string; size: string; reason: string }): string {
-    const { filePath, preview, size, reason } = params;
+  private createFileDumpMessage(params: { filePath: string; preview: string; entry: ToolResultWithInfo }): string {
+    const { filePath, preview, entry } = params;
+    const charCap = this.individualResponseCharacterLimit();
     const steps: string[] = [
-      dedent`Use sandbox to read parts of the file or extract data.
+      dedent`Use sandbox to read or extract from the file.
       Use ${SANDBOX_SCHEMA_INFER_TAG} to understand the schema.
-      The file's total size is given above. Plan reads against it, for example extract fields with a script or read sized ranges, instead of probing with small incremental reads.`,
+      Each sandbox tool response must stay under the ${charCap}-character tool call response limit.
+      Prefer one read or extract that returns only what you need, using up to that ${charCap}-character limit when useful.`,
     ];
 
     if (this.dynamicSubAgentsPresent) {
@@ -111,11 +139,11 @@ export class LargeToolResponseProcessor implements ToolResponseProcessor {
       );
     }
 
-    const guidance = `The Agent can do the following to handle it:\n${steps
+    const guidance = `To handle a large tool call the Agent can do the following:\n${steps
       .map((step, index) => `${String(index + 1)}. ${step}`)
       .join('\n')}`;
 
-    return `Content too large (${size}; ${reason}). Result saved to: ${filePath}.\n\n${guidance}\n\nPreview (first and last ${String(this.previewNumberOfCharacters)} chars):\n${preview}`;
+    return `${this.formatBlockedContentPreamble(entry)}. Result saved to: ${filePath}.\n\n${guidance}\n\n${this.formatPreview(preview)}`;
   }
 
   private buildResultsWithInfo(results: ToolCallResult[], sandbox: HarnessSandbox | undefined): ToolResultWithInfo[] {
@@ -142,10 +170,10 @@ export class LargeToolResponseProcessor implements ToolResponseProcessor {
         newContent = entry.originalContent.slice(0, FAILURE_MESSAGE_TRUNCATION_LENGTH);
         break;
       case 'sandbox':
-        newContent = `Content too big (${this.blockReasonDescription(entry)}). The Agent should write to a file if required and use grep and sed.\n\nPreview:\n${preview}`;
+        newContent = `${this.formatBlockedContentPreamble(entry)}. Write the full output to a file, then return only what you need, staying under the ${this.individualResponseCharacterLimit()}-character tool call response limit (you may use up to that limit). Use grep and sed on the file as needed.\n\n${this.formatPreview(preview)}`;
         break;
       case 'mcp':
-        newContent = `${this.createLargeToolResponseGuidance(sandbox, entry)}\n\nPreview (first and last ${String(this.previewNumberOfCharacters)} chars):\n${preview}`;
+        newContent = `${this.createLargeToolResponseGuidance(sandbox, entry)}\n\n${this.formatPreview(preview)}`;
         if (sandbox) {
           pendingSandboxDumps.push(entry);
         }
@@ -178,8 +206,7 @@ export class LargeToolResponseProcessor implements ToolResponseProcessor {
       entry.toolCallResult.message.content = this.createFileDumpMessage({
         filePath: stored.filePath,
         preview,
-        size: describeContentSize(entry.originalContent),
-        reason: this.blockReasonDescription(entry),
+        entry,
       });
       entry.toolCallResult.isStructuredContent = false;
       return stored.sandboxCreated;
@@ -207,7 +234,9 @@ export class LargeToolResponseProcessor implements ToolResponseProcessor {
     execution: Readonly<AgentThreadExecutionContext>,
   ): Promise<ToolResponseProcessorResult> {
     const sandbox = execution.sandbox;
-    const resultsWithInfo = this.buildResultsWithInfo(results, sandbox);
+    const resultsWithInfo = this.buildResultsWithInfo(results, sandbox).filter(
+      entry => !isWithinElevatedCharacterLimit(entry),
+    );
     let runningTotal = resultsWithInfo.reduce((sum, e) => sum + e.originalTokens, 0);
 
     if (runningTotal < this.individualTokenThreshold) {
