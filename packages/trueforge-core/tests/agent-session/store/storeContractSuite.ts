@@ -1469,13 +1469,12 @@ export function runStoreContractSuite<TTransaction>(
       expect(await lastTurnDetails(store)).toBeNull();
     });
 
-    it('createTurn sets id and running status with last_turn_id', async () => {
+    it('createTurn sets id and running status', async () => {
       const store = createStore();
       await seedSession(store);
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
       const session = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
       expect(session.last_turn_details).toEqual({ id: 'turn-1', state: { status: 'running' } });
-      expect(session.last_turn_id).toBe('turn-1');
     });
 
     it('follows pause, resume, and terminal transitions of the last turn', async () => {
@@ -1637,14 +1636,14 @@ export function runStoreContractSuite<TTransaction>(
   });
 
   describe('createTurn', () => {
-    it('atomically links last_turn_id and bumps activity', async () => {
+    it('atomically links last_turn_details and bumps activity', async () => {
       const store = createStore();
       await seedSession(store);
       const before = await store.getSession({ tenant_id: tenant, session_id: sessionId });
       await new Promise(r => setTimeout(r, 5));
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
       const after = await store.getSession({ tenant_id: tenant, session_id: sessionId });
-      expect(mustGet(after).last_turn_id).toBe('turn-1');
+      expect(mustGet(after).last_turn_details?.id).toBe('turn-1');
       expect(mustGet(after).last_activity_timestamp_ms).toBeGreaterThan(mustGet(before).last_activity_timestamp_ms);
     });
 
@@ -1698,7 +1697,7 @@ export function runStoreContractSuite<TTransaction>(
         makeCreateTurnInput({ sessionId, turnId: 'turn-fork', previousTurnId: 'turn-1', firstTurnId: 'turn-1' }),
       );
       const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
-      expect(mustGet(session).last_turn_id).toBe('turn-fork');
+      expect(mustGet(session).last_turn_details?.id).toBe('turn-fork');
     });
 
     it('new root turn (no previous_turn_id) succeeds on non-empty session', async () => {
@@ -1707,7 +1706,7 @@ export function runStoreContractSuite<TTransaction>(
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1' }));
       await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-root-2' }));
       const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
-      expect(mustGet(session).last_turn_id).toBe('turn-root-2');
+      expect(mustGet(session).last_turn_details?.id).toBe('turn-root-2');
     });
 
     it('concurrent createTurn forking the same tip: both succeed with isolated context', async () => {
@@ -1761,7 +1760,7 @@ export function runStoreContractSuite<TTransaction>(
       ]);
       expect(results.every(r => r.status === 'fulfilled')).toBe(true);
       const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
-      expect(['turn-a', 'turn-b']).toContain(mustGet(session).last_turn_id);
+      expect(['turn-a', 'turn-b']).toContain(mustGet(session).last_turn_details?.id);
       const turns = await store.listTurns({
         session_id: sessionId,
         limit: 10,
@@ -1806,7 +1805,7 @@ export function runStoreContractSuite<TTransaction>(
       ).rejects.toBeInstanceOf(PreviousTurnRunningError);
       expect(await store.getTurn({ session_id: sessionId, turn_id: 'turn-2' })).toBeUndefined();
       const afterReject = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
-      expect(afterReject.last_turn_id).toBe('turn-1');
+      expect(afterReject.last_turn_details?.id).toBe('turn-1');
       expect(afterReject.metrics.total_turns).toBe(1);
 
       const runningState = { status: 'running' } as const;

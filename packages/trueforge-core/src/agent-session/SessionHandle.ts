@@ -166,7 +166,7 @@ export class SessionHandle<
     active_executor_id: string;
     resolver: ITurnResourceResolver<TTurnCustom>;
     abortController: AbortController;
-    /** 'auto'/omitted → session.last_turn_id; 'none' → new root; id → fork from that turn. */
+    /** 'auto'/omitted → session.last_turn_details.id; 'none' → new root; id → fork from that turn. */
     previous_turn_id?: string | undefined;
     input?: UserMessage[] | undefined;
     /**
@@ -178,7 +178,7 @@ export class SessionHandle<
     /** Value = stored as-is. Fn = merge over previous turn's custom. Omitted = undefined. */
     custom?: TTurnCustom | ((previous?: TTurnCustom) => TTurnCustom) | undefined;
   }): Promise<TurnHandle<TTransaction, TTurnCustom>> {
-    const previousTurnId = resolvePreviousTurnId(input.previous_turn_id, this.session.last_turn_id);
+    const previousTurnId = resolvePreviousTurnId(input.previous_turn_id, this.session.last_turn_details?.id);
     const previous = previousTurnId
       ? await this.freezeTurn({
           turn_id: previousTurnId,
