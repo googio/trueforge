@@ -10,7 +10,10 @@ import type { DirectoryUser, SessionAccessGrant, SessionSubject } from '../serve
 import { useCopySharedSessionLink } from './useCopySharedSessionLink.js';
 import { useResourcePermissions } from './useResourcePermissions.js';
 
-export type SessionSharePermission = 'private' | 'tenant';
+export const SESSION_SHARE_PRIVATE = 'private' as const;
+export const SESSION_SHARE_TENANT = 'tenant' as const;
+
+export type SessionSharePermission = typeof SESSION_SHARE_PRIVATE | typeof SESSION_SHARE_TENANT;
 
 export function useShareSessionDialog(sessionId: string | null | undefined): {
   permission: SessionSharePermission;
@@ -38,7 +41,7 @@ export function useShareSessionDialog(sessionId: string | null | undefined): {
   const { allows } = useResourcePermissions({ resourceType: 'session', resourceIds });
   const canManage = allows(sessionId, 'MANAGE');
   const { copied, copySharedSessionLink: copyLink } = useCopySharedSessionLink(sessionId);
-  const [permission, setPermission] = useState<SessionSharePermission>('private');
+  const [permission, setPermission] = useState<SessionSharePermission>(SESSION_SHARE_PRIVATE);
   const [tenantId, setTenantId] = useState<string | undefined>();
   const [owner, setOwner] = useState<SessionSubject | undefined>();
   const [collaborators, setCollaborators] = useState<SessionAccessGrant[]>([]);
@@ -55,7 +58,7 @@ export function useShareSessionDialog(sessionId: string | null | undefined): {
     try {
       const session = await server.getSession({ sessionId });
       setOwner(session.createdBy);
-      setPermission(session.shared === true ? 'tenant' : 'private');
+      setPermission(session.shared === true ? SESSION_SHARE_TENANT : SESSION_SHARE_PRIVATE);
       if (server.getMe != null) {
         try {
           const me = await server.getMe();
@@ -64,7 +67,7 @@ export function useShareSessionDialog(sessionId: string | null | undefined): {
           // Keep the generic tenant label when identity is unavailable.
         }
       }
-      // Grants are creator-only; other viewers would get a 403.
+      // listAccess is creator/manager-only on the host; skip for viewers to avoid a 403.
       if (sessionAccess != null && canManage) {
         const grants = await sessionAccess.listAccess({ sessionId });
         setCollaborators(grants.filter(grant => grant.subjectType === 'user'));
@@ -84,7 +87,7 @@ export function useShareSessionDialog(sessionId: string | null | undefined): {
       const previous = permission;
       setPermission(next);
       try {
-        await server.updateSession({ sessionId, shared: next === 'tenant' });
+        await server.updateSession({ sessionId, shared: next === SESSION_SHARE_TENANT });
       } catch (caught) {
         setPermission(previous);
         toaster?.showError(caught);
@@ -131,7 +134,7 @@ export function useShareSessionDialog(sessionId: string | null | undefined): {
     toaster?.showSuccess({
       title: 'Link copied to your clipboard',
       description:
-        permission === 'tenant'
+        permission === SESSION_SHARE_TENANT
           ? 'Anyone in your workspace can open this link.'
           : 'Only invited collaborators can open this link.',
     });

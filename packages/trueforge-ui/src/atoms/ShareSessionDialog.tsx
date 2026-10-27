@@ -5,7 +5,12 @@ import { useState, type ReactNode } from 'react';
 import { useTrackAnalytics } from '../analytics/AnalyticsProvider.js';
 import { AnalyticsEvents } from '../analytics/events.js';
 import { useSessionUserSearch } from '../hooks/useSessionUserSearch.js';
-import { useShareSessionDialog, type SessionSharePermission } from '../hooks/useShareSessionDialog.js';
+import {
+  SESSION_SHARE_PRIVATE,
+  SESSION_SHARE_TENANT,
+  useShareSessionDialog,
+  type SessionSharePermission,
+} from '../hooks/useShareSessionDialog.js';
 import { Icon } from '../icons/Icon.js';
 import type { DirectoryUser } from '../server/types.js';
 import { auiInputClass } from './lib/inputClasses.js';
@@ -20,11 +25,11 @@ export type ShareSessionDialogProps = {
 };
 
 const SHARE_PERMISSIONS: Record<SessionSharePermission, { title: string; description: string }> = {
-  private: { title: 'Only you', description: 'Only you have access' },
-  tenant: { title: 'Everyone within this tenant', description: 'Everyone has access' },
+  [SESSION_SHARE_PRIVATE]: { title: 'Only you', description: 'Only you have access' },
+  [SESSION_SHARE_TENANT]: { title: 'Everyone within this tenant', description: 'Everyone has access' },
 };
 
-const SHARE_PERMISSION_VALUES: readonly SessionSharePermission[] = ['private', 'tenant'];
+const SHARE_PERMISSION_VALUES: readonly SessionSharePermission[] = [SESSION_SHARE_PRIVATE, SESSION_SHARE_TENANT];
 
 function permissionCopy({
   permission,
@@ -33,8 +38,8 @@ function permissionCopy({
   permission: SessionSharePermission;
   tenantId: string | undefined;
 }): { title: string; description: string } {
-  if (permission === 'tenant' && tenantId != null && tenantId.length > 0) {
-    return { title: `Everyone within ${tenantId}`, description: SHARE_PERMISSIONS.tenant.description };
+  if (permission === SESSION_SHARE_TENANT && tenantId != null && tenantId.length > 0) {
+    return { title: `Everyone within ${tenantId}`, description: SHARE_PERMISSIONS[SESSION_SHARE_TENANT].description };
   }
   return SHARE_PERMISSIONS[permission];
 }
@@ -321,7 +326,7 @@ export function ShareSessionDialog({ sessionId, trigger }: ShareSessionDialogPro
           {owner == null ? null : <PersonRow label={owner.displayName} role="owner" />}
         </div>
       ) : null}
-      {permission === 'tenant' || collaborators.length > 0 ? (
+      {permission === SESSION_SHARE_TENANT || collaborators.length > 0 ? (
         <>
           <div role="separator" className="bg-border h-px w-full" />
           <div className="flex w-full items-center gap-2">
