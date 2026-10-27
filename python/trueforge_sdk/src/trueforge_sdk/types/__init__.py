@@ -46,6 +46,8 @@ if typing.TYPE_CHECKING:
     from .chat_completion_message_tool_call import ChatCompletionMessageToolCall
     from .chat_completion_message_tool_call_function import ChatCompletionMessageToolCallFunction
     from .compaction_config import CompactionConfig
+    from .compaction_trigger import CompactionTrigger
+    from .completion_usage import CompletionUsage
     from .components_schemas_tool_approval_policy_allow_session import ComponentsSchemasToolApprovalPolicyAllowSession
     from .configured_mcp_server import ConfiguredMcpServer
     from .configured_model import ConfiguredModel
@@ -200,6 +202,8 @@ if typing.TYPE_CHECKING:
     from .session_agent_spec_body import SessionAgentSpecBody
     from .session_event import SessionEvent
     from .session_event_item import SessionEventItem
+    from .session_last_turn_details import SessionLastTurnDetails
+    from .session_last_turn_state import SessionLastTurnState
     from .session_metadata import SessionMetadata
     from .session_metrics import SessionMetrics
     from .session_metrics_chart import SessionMetricsChart
@@ -221,6 +225,8 @@ if typing.TYPE_CHECKING:
     from .skill_manifest import SkillManifest
     from .skill_version import SkillVersion
     from .text_content import TextContent
+    from .thread_context_compaction_finished_event import ThreadContextCompactionFinishedEvent
+    from .thread_context_compaction_started_event import ThreadContextCompactionStartedEvent
     from .thread_created_event import ThreadCreatedEvent
     from .thread_done_event import ThreadDoneEvent
     from .thread_state import ThreadState
@@ -257,6 +263,7 @@ if typing.TYPE_CHECKING:
     from .turn_state_error_metrics import TurnStateErrorMetrics
     from .turn_state_paused import TurnStatePaused
     from .turn_state_running import TurnStateRunning
+    from .turn_status import TurnStatus
     from .turn_streaming_event import TurnStreamingEvent
     from .turn_update_event import TurnUpdateEvent
     from .turn_update_event_state import TurnUpdateEventState
@@ -316,6 +323,8 @@ _dynamic_imports: typing.Dict[str, str] = {
     "ChatCompletionMessageToolCall": ".chat_completion_message_tool_call",
     "ChatCompletionMessageToolCallFunction": ".chat_completion_message_tool_call_function",
     "CompactionConfig": ".compaction_config",
+    "CompactionTrigger": ".compaction_trigger",
+    "CompletionUsage": ".completion_usage",
     "ComponentsSchemasToolApprovalPolicyAllowSession": ".components_schemas_tool_approval_policy_allow_session",
     "ConfiguredMcpServer": ".configured_mcp_server",
     "ConfiguredModel": ".configured_model",
@@ -470,6 +479,8 @@ _dynamic_imports: typing.Dict[str, str] = {
     "SessionAgentSpecBody": ".session_agent_spec_body",
     "SessionEvent": ".session_event",
     "SessionEventItem": ".session_event_item",
+    "SessionLastTurnDetails": ".session_last_turn_details",
+    "SessionLastTurnState": ".session_last_turn_state",
     "SessionMetadata": ".session_metadata",
     "SessionMetrics": ".session_metrics",
     "SessionMetricsChart": ".session_metrics_chart",
@@ -491,6 +502,8 @@ _dynamic_imports: typing.Dict[str, str] = {
     "SkillManifest": ".skill_manifest",
     "SkillVersion": ".skill_version",
     "TextContent": ".text_content",
+    "ThreadContextCompactionFinishedEvent": ".thread_context_compaction_finished_event",
+    "ThreadContextCompactionStartedEvent": ".thread_context_compaction_started_event",
     "ThreadCreatedEvent": ".thread_created_event",
     "ThreadDoneEvent": ".thread_done_event",
     "ThreadState": ".thread_state",
@@ -527,6 +540,7 @@ _dynamic_imports: typing.Dict[str, str] = {
     "TurnStateErrorMetrics": ".turn_state_error_metrics",
     "TurnStatePaused": ".turn_state_paused",
     "TurnStateRunning": ".turn_state_running",
+    "TurnStatus": ".turn_status",
     "TurnStreamingEvent": ".turn_streaming_event",
     "TurnUpdateEvent": ".turn_update_event",
     "TurnUpdateEventState": ".turn_update_event_state",
@@ -610,6 +624,8 @@ __all__ = [
     "ChatCompletionMessageToolCall",
     "ChatCompletionMessageToolCallFunction",
     "CompactionConfig",
+    "CompactionTrigger",
+    "CompletionUsage",
     "ComponentsSchemasToolApprovalPolicyAllowSession",
     "ConfiguredMcpServer",
     "ConfiguredModel",
@@ -764,6 +780,8 @@ __all__ = [
     "SessionAgentSpecBody",
     "SessionEvent",
     "SessionEventItem",
+    "SessionLastTurnDetails",
+    "SessionLastTurnState",
     "SessionMetadata",
     "SessionMetrics",
     "SessionMetricsChart",
@@ -785,6 +803,8 @@ __all__ = [
     "SkillManifest",
     "SkillVersion",
     "TextContent",
+    "ThreadContextCompactionFinishedEvent",
+    "ThreadContextCompactionStartedEvent",
     "ThreadCreatedEvent",
     "ThreadDoneEvent",
     "ThreadState",
@@ -821,6 +841,7 @@ __all__ = [
     "TurnStateErrorMetrics",
     "TurnStatePaused",
     "TurnStateRunning",
+    "TurnStatus",
     "TurnStreamingEvent",
     "TurnUpdateEvent",
     "TurnUpdateEventState",
